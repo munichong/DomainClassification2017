@@ -5,6 +5,7 @@ Created on Oct 30, 2017
 '''
 import numpy as np, pickle, json, csv, os
 import tensorflow as tf
+from pprint import pprint
 from random import shuffle
 from tabulate import tabulate
 from sklearn.metrics import precision_recall_fscore_support
@@ -13,11 +14,13 @@ import warnings
 warnings.filterwarnings(action='ignore', category=UserWarning, module='gensim')
 from gensim.models.wrappers import FastText
 
+DATASET = 'content'  # 'content' or '2340768'
+
 type = 'CNN'
 # For RNN
 n_rnn_neurons = 300
 # For CNN
-filter_sizes = [1,2]
+filter_sizes = [2]
 num_filters = 512
 
 embed_dimen = 300
@@ -26,13 +29,16 @@ dropout_rate= 0.2
 n_fc_layers= 3
 act_fn = tf.nn.relu
 
-n_epochs = 30
-batch_size = 128
+n_epochs = 60
+batch_size = 6000
 lr_rate = 0.001
+
+class_weighted = False
+
 
 OUTPUT_DIR = '../Output/'
 
-category2index = pickle.load(open(os.path.join(OUTPUT_DIR + 'category2index.dict'), 'rb'))
+category2index = pickle.load(open(os.path.join(OUTPUT_DIR + 'category2index_%s.dict' % DATASET), 'rb'))
 categories = [''] * len(category2index)
 for cate, i in category2index.items():
     categories[i] = cate
@@ -43,33 +49,31 @@ print("Loading the FastText Model")
 # en_model = {"test":np.array([0]*300)}
 en_model = FastText.load_fasttext_format('../FastText/wiki.en/wiki.en')
 
-# TODO: Hard_coded (Can be improved)
-class_weights = {'Sports':0.125,
-                 'Business':0.03,
-                 'Health':0.18,
-                 'Science':0.18,
-                 'Recreation':0.1,
-                 'News':1.25,
-                 'Shopping':0.1,
-                 'Society':0.05,
-                 'Reference':0.32,
-                 'Computers':0.1,
-                 'Home':0.625,
-                 'Arts':0.066,
-                 'Games':0.435}
 
 
 class SimpleFastTextClassifier:
 
     def __init__(self):
         ''' load data '''
-        self.domains_train = pickle.load(open(OUTPUT_DIR + 'training_domains.list', 'rb'))
+        self.domains_train = pickle.load(open(OUTPUT_DIR + 'training_domains_%s.list' % DATASET, 'rb'))
         # print(self.domains_train[0].keys())
-        self.domains_val = pickle.load(open(OUTPUT_DIR + 'validation_domains.list', 'rb'))
-        self.domains_test = pickle.load(open(OUTPUT_DIR + 'test_domains.list', 'rb'))
+        self.domains_val = pickle.load(open(OUTPUT_DIR + 'validation_domains_%s.list' % DATASET, 'rb'))
+        self.domains_test = pickle.load(open(OUTPUT_DIR + 'test_domains_%s.list' % DATASET, 'rb'))
 
         ''' load params '''
-        self.params = json.load(open(OUTPUT_DIR + 'params.json'))
+        self.params = json.load(open(OUTPUT_DIR + 'params_%s.json' % DATASET))
+        self.compute_class_weights()
+
+    def compute_class_weights(self):
+        n_total = sum(self.params['category_dist_traintest'].values())
+        n_class = len(self.params['category_dist_traintest'])
+        self.class_weights = {cat: max(min( n_total / (n_class * self.params['category_dist_traintest'][cat]), 1.5), 0.5)
+                              for cat, size in self.params['category_dist_traintest'].items()}
+        # self.class_weights['Sports'] = 1
+        # self.class_weights['Health'] = 1
+        # self.class_weights['Business'] = 0.8
+        # self.class_weights['Arts'] = 0.8
+        pprint(self.class_weights)
 
     def next_batch(self, domains, batch_size=batch_size):
         X_batch_embed = []
@@ -94,7 +98,7 @@ class SimpleFastTextClassifier:
                 one_hot_suf[domains[i]['suffix_indices']] = 1.0 / len(domains[i]['suffix_indices'])
                 X_batch_suf.append(one_hot_suf)
 
-                sample_weights.append(class_weights[categories[domains[i]['target']]])
+                sample_weights.append(self.class_weights[categories[domains[i]['target']]])
                 y_batch.append(domains[i]['target'])
             yield np.array(X_batch_embed), np.array(domain_actual_lens), np.array(X_batch_suf), \
                   np.array(sample_weights), np.array(y_batch)
@@ -206,8 +210,10 @@ class SimpleFastTextClassifier:
 
         logits = tf.contrib.layers.fully_connected(logits, self.params['num_targets'], activation_fn=act_fn)
 
-        # crossentropy = tf.losses.sparse_softmax_cross_entropy(labels=y, logits=logits, weights=sample_weights)
-        crossentropy = tf.losses.sparse_softmax_cross_entropy(labels=y, logits=logits)
+        if class_weighted:
+            crossentropy = tf.losses.sparse_softmax_cross_entropy(labels=y, logits=logits, weights=sample_weights)
+        else:
+            crossentropy = tf.losses.sparse_softmax_cross_entropy(labels=y, logits=logits)
 
         loss_mean = tf.reduce_mean(crossentropy)
         optimizer = tf.train.AdamOptimizer(learning_rate=lr_rate)
@@ -247,28 +253,28 @@ class SimpleFastTextClassifier:
                                                                                'length:0': domain_actual_lens,
                                                                                'weight:0': sample_weights,
                                                                                'target:0': y_batch})
-                    
+
                     n_batch += 1
                     if epoch < 2:
                         # print(prediction_train)
                         print("Epoch %d - Batch %d/%d: loss = %.4f, accuracy = %.4f" %
                               (epoch, n_batch, n_total_batches, loss_batch_train, acc_batch_train))
-                        
+
 
                 # evaluation on training data
                 eval_nodes = [n_correct, loss_mean, is_correct, prediction]
                 print()
                 print("========== Evaluation at Epoch %d ==========" % epoch)
                 loss_train, acc_train, _, _ = self.evaluate(self.domains_train, sess, eval_nodes)
-                print("*** On Training Set:\tloss = %.4f\taccuracy = %.4f" % (loss_train, acc_train))
+                print("*** On Training Set:\tloss = %.6f\taccuracy = %.4f" % (loss_train, acc_train))
 
                 # evaluation on validation data
                 loss_val, acc_val, _, _ = self.evaluate(self.domains_val, sess, eval_nodes)
-                print("*** On Validation Set:\tloss = %.4f\taccuracy = %.4f" % (loss_val, acc_val))
+                print("*** On Validation Set:\tloss = %.6f\taccuracy = %.4f" % (loss_val, acc_val))
 
                 # evaluate on test data
                 loss_test, acc_test, is_correct_test, pred_test = self.evaluate(self.domains_test, sess, eval_nodes)
-                print("*** On Test Set:\tloss = %.4f\taccuracy = %.4f" % (loss_test, acc_test))
+                print("*** On Test Set:\tloss = %.6f\taccuracy = %.4f" % (loss_test, acc_test))
 
                 print()
                 print("Classification Performance on individual classes:")

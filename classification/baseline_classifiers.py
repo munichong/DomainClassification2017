@@ -7,10 +7,11 @@ import re, pickle, numpy
 from _collections import defaultdict
 from string import punctuation
 from sklearn.metrics import accuracy_score
-from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
 from sklearn.svm import LinearSVC, SVC
 from sklearn.metrics import precision_recall_fscore_support
 
+DATASET = 'content'  # 'content' or '2340768'
 
 OUTPUT_DIR = '../Output/'
 
@@ -27,7 +28,7 @@ class BaselineClassifier:
     def features(self, url):
 
         """ Feature 1: tokens """
-        tokens_list = self.tokens(url);
+        tokens_list = self.tokens(url)
 #         print tokens_list
 
         """ Feature 2: n-grams from tokens"""
@@ -92,7 +93,7 @@ class BaselineClassifier:
         """ Loading Training Data """
         X_train = []
         y_train = []
-        training_domains = pickle.load(open(OUTPUT_DIR + 'training_domains.list', 'rb'))
+        training_domains = pickle.load(open(OUTPUT_DIR + 'training_domains_%s.list' % DATASET, 'rb'))
         for domain in training_domains:
             if token == 'char-ngram':
                 X_train.append(' '.join(self.features(domain['raw_domain'])))
@@ -102,22 +103,22 @@ class BaselineClassifier:
             
         
         """ Fit and transform X and Y """
-        tfidf = TfidfVectorizer(max_features=100000)
-        X_train = tfidf.fit_transform(X_train) # return term-document matrix
+        vectorizer = CountVectorizer()
+        X_train = vectorizer.fit_transform(X_train) # return term-document matrix
         print(X_train.shape[0], "training examples and", X_train.shape[1], "features")
         
         
         """ Loading Test Data """
         X_test = []
         y_test = []
-        test_domains = pickle.load(open(OUTPUT_DIR + 'test_domains.list', 'rb'))
+        test_domains = pickle.load(open(OUTPUT_DIR + 'test_domains_%s.list' % DATASET, 'rb'))
         for domain in test_domains:
             if token == 'char-ngram':
                 X_test.append(' '.join(self.features(domain['raw_domain'])))
             elif token == 'word':
                 X_test.append(' '.join(domain['segmented_domain']))
             y_test.append(domain['target'])
-        X_test = tfidf.transform(X_test)
+        X_test = vectorizer.transform(X_test)
         print("X_test has been transformed")
         total_test_size = X_test.shape[0]
         X_test, y_test = self.testcases_with_nonzero_vectors(X_test, y_test)
@@ -182,6 +183,7 @@ class BaselineClassifier:
     '''
 
     def get_detailed_evalRes(self, clf, X_train, y_train, X_test, y_test):
+
         clf.fit(X_train, y_train)
 
         # TEST overfitting
@@ -222,9 +224,9 @@ if __name__ == '__main__':
     token='char-ngram': Baykan2011-based method
     token='word': simple segment-based method
     '''
-    X_train, y_train, X_test, y_test = classifier.buildXY(token='word')
-    
-    clf = LinearSVC(C=0.1, penalty='l2', verbose=0)
+    X_train, y_train, X_test, y_test = classifier.buildXY(token='char-ngram')
+
+    clf = LinearSVC(C=0.001, penalty='l2', verbose=0)
     classifier.get_detailed_evalRes(clf, X_train, y_train, X_test, y_test)
     
     
