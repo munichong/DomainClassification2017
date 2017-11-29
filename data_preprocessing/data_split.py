@@ -8,7 +8,7 @@ from pprint import pprint
 from random import shuffle
 from collections import Counter, defaultdict
 
-DATASET = 'content' # 'content' or '2340768'
+DATASET = '2340768'  # 'content' or '2340768'
 
 TRANS_DMOZ_PATH = '../DMOZ/transformed_%s.json' % DATASET
 
@@ -98,7 +98,8 @@ pickle.dump(validation_domains, open(os.path.join(OUTPUT_DIR + 'validation_domai
 pickle.dump(test_domains, open(os.path.join(OUTPUT_DIR + 'test_domains_%s.list' % DATASET), 'wb'))
 
 
-params = {'num_targets': len(category2index), 'num_suffix': len(suffix2index), 'max_domain_segments_len': max(domain_segments_len_dist.keys())}
+params = {'num_targets': len(category2index), 'num_suffix': len(suffix2index), 'max_domain_segments_len': max(domain_segments_len_dist.keys()),
+          'category_dist_traintest': {cat: len(category_domains[category2index[cat]]) for cat in category2index}}
 print(params)
 json.dump(params, open(os.path.join(OUTPUT_DIR, 'params_%s.json' % DATASET), 'w'))
 
