@@ -103,10 +103,26 @@ class BaselineClassifier:
             
         
         """ Fit and transform X and Y """
-        vectorizer = CountVectorizer()
+        vectorizer = TfidfVectorizer(sublinear_tf=True)
         X_train = vectorizer.fit_transform(X_train) # return term-document matrix
         print(X_train.shape[0], "training examples and", X_train.shape[1], "features")
-        
+
+        """ Loading Validation Data """
+        X_val = []
+        y_val = []
+        val_domains = pickle.load(open(OUTPUT_DIR + 'validation_domains_%s.list' % DATASET, 'rb'))
+        for domain in val_domains:
+            if token == 'char-ngram':
+                X_val.append(' '.join(self.features(domain['raw_domain'])))
+            elif token == 'word':
+                X_val.append(' '.join(domain['segmented_domain']))
+            y_val.append(domain['target'])
+        X_val = vectorizer.transform(X_val)
+        print("X_val has been transformed")
+        total_val_size = X_val.shape[0]
+        X_val, y_val = self.testcases_with_nonzero_vectors(X_val, y_val)
+        actual_val_size = X_val.shape[0]
+        print(actual_val_size, "out of", total_val_size, "val examples have non-zero feature vectors")
         
         """ Loading Test Data """
         X_test = []
@@ -125,7 +141,7 @@ class BaselineClassifier:
         actual_test_size = X_test.shape[0]
         print(actual_test_size, "out of", total_test_size, "test examples have non-zero feature vectors")
         
-        return X_train, y_train, X_test, y_test
+        return X_train, y_train, X_val, y_val, X_test, y_test
 
     '''
     def getCVIndex(self, y):
@@ -182,7 +198,7 @@ class BaselineClassifier:
         print(cv_res)
     '''
 
-    def get_detailed_evalRes(self, clf, X_train, y_train, X_test, y_test):
+    def get_detailed_evalRes(self, clf, X_train, y_train, X_val, y_val, X_test, y_test):
 
         clf.fit(X_train, y_train)
 
@@ -199,6 +215,19 @@ class BaselineClassifier:
         print("Precision (macro): %.4f, Recall (macro): %.4f, F-score (macro): %.4f" % (precision0, recall0, fscore0))
         print("Accuracy: %.4f" % accuracy_score(y_train, y_pred_train))
 
+
+
+        print("\nPerformance on Validation Data")
+        y_pred_val = clf.predict(X_val)
+        precision, recall, fscore, support = precision_recall_fscore_support(y_val, y_pred_val,
+                                                                             average=None)
+        for p, r, f, s in zip(precision, recall, fscore, support):
+            print(p, r, f, s)
+
+        precision, recall, fscore, _ = precision_recall_fscore_support(y_val, y_pred_val,
+                                                                       average='macro')
+        print("Precision (macro): %.4f, Recall (macro): %.4f, F-score (macro): %.4f" % (precision, recall, fscore))
+        print("Accuracy: %.4f" % accuracy_score(y_val, y_pred_val))
 
 
 
@@ -224,10 +253,10 @@ if __name__ == '__main__':
     token='char-ngram': Baykan2011-based method
     token='word': simple segment-based method
     '''
-    X_train, y_train, X_test, y_test = classifier.buildXY(token='char-ngram')
+    X_train, y_train, X_val, y_val, X_test, y_test = classifier.buildXY(token='word')
 
-    clf = LinearSVC(C=0.001, penalty='l2', verbose=0)
-    classifier.get_detailed_evalRes(clf, X_train, y_train, X_test, y_test)
+    clf = LinearSVC(C=0.1, penalty='l2', verbose=0)
+    classifier.get_detailed_evalRes(clf, X_train, y_train, X_val, y_val, X_test, y_test)
     
     
     

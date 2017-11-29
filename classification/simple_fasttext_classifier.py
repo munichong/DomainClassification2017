@@ -16,7 +16,7 @@ from gensim.models.wrappers import FastText
 
 DATASET = 'content'  # 'content' or '2340768'
 
-type = 'CNN'
+type = 'CNN/RNN'
 # For RNN
 n_rnn_neurons = 300
 # For CNN
@@ -167,12 +167,14 @@ class SimpleFastTextClassifier:
         #                                           )
         #                                   for w in x_tokens])
 
-
-        if type == 'RNN':
+        domain_vectors = []
+        if 'RNN' in type:
             rnn_cell = tf.contrib.rnn.BasicRNNCell(n_rnn_neurons, activation=tf.nn.tanh)
             # The shape of last_states should be [batch_size, n_lstm_neurons]
-            _, domain_vec = tf.nn.dynamic_rnn(rnn_cell, x_embed, sequence_length=seq_len, dtype=tf.float32, time_major=False)
-        elif type == 'CNN':
+            _, domain_vec_rnn = tf.nn.dynamic_rnn(rnn_cell, x_embed, sequence_length=seq_len, dtype=tf.float32, time_major=False)
+            domain_vec_rnn = tf.layers.dropout(domain_vec_rnn, dropout_rate, training=is_training)
+            domain_vectors.append(domain_vec_rnn)
+        if 'CNN' in type:
             pooled_outputs = []
             for filter_size in filter_sizes:
                 # Define and initialize filters
@@ -192,16 +194,15 @@ class SimpleFastTextClassifier:
             # Combine all the pooled features
             h_pool = tf.concat(pooled_outputs, axis=3)
             num_filters_total = num_filters * len(filter_sizes)
-            domain_vec = tf.reshape(h_pool, [-1, num_filters_total])
+            domain_vec_cnn = tf.reshape(h_pool, [-1, num_filters_total])
+            domain_vec_cnn = tf.layers.dropout(domain_vec_cnn, dropout_rate, training=is_training)
+            domain_vectors.append(domain_vec_cnn)
 
-
-        # Dropout
-        domain_vec = tf.layers.dropout(domain_vec, dropout_rate, training=is_training)
 
 
         # concatenate suffix one-hot and the abstract representation of the domains segments
         # The shape of cat_layer should be [batch_size, n_lstm_neurons+self.params['num_suffix']]
-        cat_layer = tf.concat([domain_vec, x_suffix], -1)
+        cat_layer = tf.concat(domain_vectors + [x_suffix], -1)
         # print(cat_layer.get_shape())
 
         for _ in range(n_fc_layers):
