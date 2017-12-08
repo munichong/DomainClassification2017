@@ -30,7 +30,7 @@ n_fc_layers= 3
 act_fn = tf.nn.relu
 
 n_epochs = 60
-batch_size = 6000
+batch_size = 256
 lr_rate = 0.001
 
 class_weighted = False
@@ -55,13 +55,13 @@ class SimpleFastTextClassifier:
 
     def __init__(self):
         ''' load data '''
-        self.domains_train = pickle.load(open(OUTPUT_DIR + 'training_domains_%s.list' % DATASET, 'rb'))
-        # print(self.domains_train[0].keys())
-        self.domains_val = pickle.load(open(OUTPUT_DIR + 'validation_domains_%s.list' % DATASET, 'rb'))
-        self.domains_test = pickle.load(open(OUTPUT_DIR + 'test_domains_%s.list' % DATASET, 'rb'))
+        self.domains_train = pickle.load(open(OUTPUT_DIR + 'training_domains_%s.list' % DATASET, 'rb'))  # [[], [], [], ...]
+        self.domains_val = pickle.load(open(OUTPUT_DIR + 'validation_domains_%s.list' % DATASET, 'rb'))  # [...]
+        self.domains_test = pickle.load(open(OUTPUT_DIR + 'test_domains_%s.list' % DATASET, 'rb'))  # [...]
 
         ''' load params '''
         self.params = json.load(open(OUTPUT_DIR + 'params_%s.json' % DATASET))
+
         self.compute_class_weights()
 
     def compute_class_weights(self):
@@ -75,50 +75,111 @@ class SimpleFastTextClassifier:
         # self.class_weights['Arts'] = 0.8
         pprint(self.class_weights)
 
-    def next_batch(self, domains, batch_size=batch_size):
+    def next_batch(self, domains, num_instances, batch_size=batch_size):
         X_batch_embed = []
         X_batch_suf = []
         domain_actual_lens = []
         sample_weights = []
         y_batch = []
-        shuffle(domains)
-        start_index = 0
-        while start_index < len(domains):
-            for i in range(start_index, min(len(domains), start_index + batch_size)):
-                embeds = [en_model[w].tolist() for w in domains[i]['segmented_domain'] if w in en_model]
-                # if not embeds: # Skip if none of segments of this domain can not be recognized by FastText
-                #     continue
-                domain_actual_lens.append(len(embeds))
-                n_extra_padding = self.params['max_domain_segments_len'] - len(embeds)
-                embeds += [[0] * embed_dimen for _ in range(n_extra_padding)]
-                # X_batch_embed.append(tf.pad(embeds, paddings=[[0, n_extra_padding],[0,0]], mode="CONSTANT"))
-                X_batch_embed.append(embeds)
 
-                one_hot_suf = np.zeros(self.params['num_suffix'])
-                one_hot_suf[domains[i]['suffix_indices']] = 1.0 / len(domains[i]['suffix_indices'])
-                X_batch_suf.append(one_hot_suf)
+        for cat_domains in domains:
+            shuffle(cat_domains)
 
-                sample_weights.append(self.class_weights[categories[domains[i]['target']]])
-                y_batch.append(domains[i]['target'])
+
+        n_batches = int(np.ceil(num_instances / batch_size))
+        start_indice = [0] * len(domains)
+        batch_size_cat= [len(d) for d in domains]
+        for _ in range(n_batches):
+            for cat_index, cat_domains in enumerate(domains):
+
+                num_domain_loaded = 0
+                while num_domain_loaded < len(cat_domains) // n_batches:
+
+                    cur_index = start_indice[i] + num_domain_loaded
+                    if cur_index < len(cat_domains):
+                        break
+                    cur_domain = cat_domains[cur_index]
+                    embeds = [en_model[w].tolist() for w in cur_domain['segmented_domain'] if w in en_model]
+                    # if not embeds:  # Skip if none of segments of this domain can not be recognized by FastText
+                    #     continue
+
+                    domain_actual_lens.append(len(embeds))
+                    n_extra_padding = self.params['max_domain_segments_len'] - len(embeds)
+                    embeds += [[0] * embed_dimen for _ in range(n_extra_padding)]
+                    X_batch_embed.append(embeds)
+
+                    one_hot_suf = np.zeros(self.params['num_suffix'])
+                    one_hot_suf[cur_domain['suffix_indices']] = 1.0 / len(cur_domain['suffix_indices'])
+                    # X_batch_embed.append(tf.pad(embeds, paddings=[[0, n_extra_padding],[0,0]], mode="CONSTANT"))
+                    X_batch_suf.append(one_hot_suf)
+
+                    sample_weights.append(self.class_weights[categories[cur_domain['target']]])
+                    y_batch.append(cur_domain['target'])
+
+                    num_domain_loaded += 1
+
+                # for d in cat_domains[start_indice[i] : start_indice[i] + len(cat_domains) // n_batches]:
+                #     embeds = [en_model[w].tolist() for w in d['segmented_domain'] if w in en_model]
+                #     # if not embeds: # Skip if none of segments of this domain can not be recognized by FastText
+                #     #     continue
+                #     domain_actual_lens.append(len(embeds))
+                #     n_extra_padding = self.params['max_domain_segments_len'] - len(embeds)
+                #     embeds += [[0] * embed_dimen for _ in range(n_extra_padding)]
+                #     # X_batch_embed.append(tf.pad(embeds, paddings=[[0, n_extra_padding],[0,0]], mode="CONSTANT"))
+                #     X_batch_embed.append(embeds)
+                #
+                #     one_hot_suf = np.zeros(self.params['num_suffix'])
+                #     one_hot_suf[d['suffix_indices']] = 1.0 / len(d['suffix_indices'])
+                #     X_batch_suf.append(one_hot_suf)
+                #
+                #     sample_weights.append(self.class_weights[categories[d['target']]])
+                #     y_batch.append(d['target'])
+
+                start_indice[i] += len(cat_domains) // batch_size
+            print(np.array(X_batch_embed).shape)
             yield np.array(X_batch_embed), np.array(domain_actual_lens), np.array(X_batch_suf), \
-                  np.array(sample_weights), np.array(y_batch)
-
-            # print(sample_weights)
+                 np.array(sample_weights), np.array(y_batch)
 
             X_batch_embed.clear()
             domain_actual_lens.clear()
             X_batch_suf.clear()
             sample_weights.clear()
             y_batch.clear()
-            start_index += batch_size
+
+        # while start_index < num_instances:
+        #     for i in range(start_index, min(len(domains), start_index + batch_size)):
+        #         embeds = [en_model[w].tolist() for w in domains[i]['segmented_domain'] if w in en_model]
+        #         # if not embeds: # Skip if none of segments of this domain can not be recognized by FastText
+        #         #     continue
+        #         domain_actual_lens.append(len(embeds))
+        #         n_extra_padding = self.params['max_domain_segments_len'] - len(embeds)
+        #         embeds += [[0] * embed_dimen for _ in range(n_extra_padding)]
+        #         # X_batch_embed.append(tf.pad(embeds, paddings=[[0, n_extra_padding],[0,0]], mode="CONSTANT"))
+        #         X_batch_embed.append(embeds)
+        #
+        #         one_hot_suf = np.zeros(self.params['num_suffix'])
+        #         one_hot_suf[domains[i]['suffix_indices']] = 1.0 / len(domains[i]['suffix_indices'])
+        #         X_batch_suf.append(one_hot_suf)
+        #
+        #         sample_weights.append(self.class_weights[categories[domains[i]['target']]])
+        #         y_batch.append(domains[i]['target'])
+        #     yield np.array(X_batch_embed), np.array(domain_actual_lens), np.array(X_batch_suf), \
+        #           np.array(sample_weights), np.array(y_batch)
+        #
+        #     X_batch_embed.clear()
+        #     domain_actual_lens.clear()
+        #     X_batch_suf.clear()
+        #     sample_weights.clear()
+        #     y_batch.clear()
+        #     start_index += batch_size
 
 
-    def evaluate(self, data, session, eval_nodes):
+    def evaluate(self, data, session, eval_nodes, n_instances):
         total_correct = 0
         total_loss = 0
         total_bool = []
         total_pred = []
-        for X_batch_embed, domain_actual_lens, X_batch_suf, sample_weights, y_batch in self.next_batch(data):
+        for X_batch_embed, domain_actual_lens, X_batch_suf, sample_weights, y_batch in self.next_batch(data, n_instances):
             batch_correct, batch_loss, batch_bool, batch_pred = session.run(eval_nodes,
                                                          feed_dict={
                                                                     'bool_train:0': False,
@@ -182,7 +243,7 @@ class SimpleFastTextClassifier:
                 W_filter = tf.Variable(tf.truncated_normal(filter_shape, stddev=0.1)) # initialize the filters' weights
                 b_filter = tf.Variable(tf.constant(0.1, shape=[num_filters]))  # initialize the filters' biases
                 # The conv2d operation expects a 4-D tensor with dimensions corresponding to batch, width, height and channel.
-                # The result of our embedding doesn’t contain the channel dimension
+                # The result of our embedding doesnâ€™t contain the channel dimension
                 # So we add it manually, leaving us with a layer of shape [None, sequence_length, embedding_size, 1].
                 x_embed_expanded = tf.expand_dims(x_embed, -1)
                 conv = tf.nn.conv2d(x_embed_expanded, W_filter, strides=[1, 1, 1, 1], padding="VALID")
@@ -240,12 +301,12 @@ class SimpleFastTextClassifier:
 
         with tf.Session() as sess:
             init.run()
-            n_total_batches = int(np.ceil(len(self.domains_train) / batch_size))
+            n_total_batches = int(np.ceil(self.params['num_training'] / batch_size))
             test_accuracy_history = []
             for epoch in range(1, n_epochs + 1):
                 # model training
                 n_batch = 0
-                for X_batch_embed, domain_actual_lens, X_batch_suf, sample_weights, y_batch in self.next_batch(self.domains_train):
+                for X_batch_embed, domain_actual_lens, X_batch_suf, sample_weights, y_batch in self.next_batch(self.domains_train, self.params['num_training']):
                     _, acc_batch_train, loss_batch_train, prediction_train = sess.run([training_op, accuracy, loss_mean, prediction],
                                                                     feed_dict={
                                                                                'bool_train:0': True,
@@ -266,15 +327,15 @@ class SimpleFastTextClassifier:
                 eval_nodes = [n_correct, loss_mean, is_correct, prediction]
                 print()
                 print("========== Evaluation at Epoch %d ==========" % epoch)
-                loss_train, acc_train, _, _ = self.evaluate(self.domains_train, sess, eval_nodes)
+                loss_train, acc_train, _, _ = self.evaluate(self.domains_train, sess, eval_nodes, self.params['num_training'])
                 print("*** On Training Set:\tloss = %.6f\taccuracy = %.4f" % (loss_train, acc_train))
 
                 # evaluation on validation data
-                loss_val, acc_val, _, _ = self.evaluate(self.domains_val, sess, eval_nodes)
+                loss_val, acc_val, _, _ = self.evaluate(self.domains_val, sess, eval_nodes, self.params['num_validation'])
                 print("*** On Validation Set:\tloss = %.6f\taccuracy = %.4f" % (loss_val, acc_val))
 
                 # evaluate on test data
-                loss_test, acc_test, is_correct_test, pred_test = self.evaluate(self.domains_test, sess, eval_nodes)
+                loss_test, acc_test, is_correct_test, pred_test = self.evaluate(self.domains_test, sess, eval_nodes, self.params['num_test'])
                 print("*** On Test Set:\tloss = %.6f\taccuracy = %.4f" % (loss_test, acc_test))
 
                 print()

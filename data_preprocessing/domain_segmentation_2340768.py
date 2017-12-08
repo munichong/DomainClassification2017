@@ -10,7 +10,7 @@ from wordsegment import load, segment
 
 
 DMOZ_PATH = '../DMOZ/parsed-new_2340768.csv'
-TRANS_DMOZ_PATH = '../DMOZ/transformed_parsed-new_2340768.json'
+TRANS_DMOZ_PATH = '../DMOZ/transformed_parsed-new_2340768.pkl'
 
 load()
 output_table = {}
@@ -45,5 +45,5 @@ with open(DMOZ_PATH) as infile:
                                      }
 #         print(output_table[raw_domain])
         
-json.dump(output_table, open(TRANS_DMOZ_PATH, 'w'))
+pickle.dump(output_table, open(TRANS_DMOZ_PATH, 'w'))
 

@@ -8,7 +8,7 @@ from pprint import pprint
 from random import shuffle
 from collections import Counter, defaultdict
 
-DATASET = '2340768'  # 'content' or '2340768'
+DATASET = 'content'  # 'content' or '2340768'
 
 TRANS_DMOZ_PATH = '../DMOZ/transformed_%s.json' % DATASET
 
@@ -25,6 +25,7 @@ suffix2index = defaultdict(int)
 suffix_dist = Counter()
 category_domains = [[]]
 domain_segments_len_dist = Counter()
+
 for full_domain in json_data:
 
     ''' processing target category '''
@@ -54,8 +55,6 @@ for full_domain in json_data:
 
     # record the length of the segmented domain
     domain_segments_len_dist[len(json_data[full_domain]['segmented_domain'])] += 1
-
-
 
     category_domains[target].append(json_data[full_domain])
 
@@ -88,18 +87,22 @@ test_domains = []
 for domains in category_domains:
     shuffle(domains)
     train_end_index = int(len(domains) * TRAIN_PCT)
-    training_domains.extend(domains[ : train_end_index])
+    training_domains.append(domains[ : train_end_index])
     validation_end_index = int(len(domains) * (TRAIN_PCT + (1 - TRAIN_PCT) / 2))
-    validation_domains.extend(domains[train_end_index : validation_end_index] )
-    test_domains.extend(domains[validation_end_index: ])
-print("Training Size:", len(training_domains), "Validation Size:", len(validation_domains), "Test Size:", len(test_domains))
+    validation_domains.append(domains[train_end_index : validation_end_index] )
+    test_domains.append(domains[validation_end_index: ])
+n_train = sum(len(cat_domains) for cat_domains in training_domains)
+n_val = sum(len(cat_domains) for cat_domains in validation_domains)
+n_test = sum(len(cat_domains) for cat_domains in test_domains)
+print("Training Size:", n_train, "Validation Size:", n_val, "Test Size:", n_test)
 pickle.dump(training_domains, open(os.path.join(OUTPUT_DIR + 'training_domains_%s.list' % DATASET), 'wb'))
 pickle.dump(validation_domains, open(os.path.join(OUTPUT_DIR + 'validation_domains_%s.list' % DATASET), 'wb'))
 pickle.dump(test_domains, open(os.path.join(OUTPUT_DIR + 'test_domains_%s.list' % DATASET), 'wb'))
 
 
 params = {'num_targets': len(category2index), 'num_suffix': len(suffix2index), 'max_domain_segments_len': max(domain_segments_len_dist.keys()),
-          'category_dist_traintest': {cat: len(category_domains[category2index[cat]]) for cat in category2index}}
+          'category_dist_traintest': {cat: len(category_domains[category2index[cat]]) for cat in category2index},
+          'num_training': n_train, 'num_validation': n_val, 'num_test': n_test}
 print(params)
 json.dump(params, open(os.path.join(OUTPUT_DIR, 'params_%s.json' % DATASET), 'w'))
 
