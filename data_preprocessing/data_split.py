@@ -23,7 +23,7 @@ json_data = json.load(open(TRANS_DMOZ_PATH))
 category2index = defaultdict(int)
 suffix2index = defaultdict(int)
 suffix_dist = Counter()
-category_domains = [[]]
+category_domains = []
 domain_segments_len_dist = Counter()
 
 for full_domain in json_data:
