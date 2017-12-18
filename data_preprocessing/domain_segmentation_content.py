@@ -37,7 +37,9 @@ with open(DMOZ_PATH, encoding='utf-8') as infile:
 
         tld = extract(raw_domain)
         suffix = tld.suffix
-        domain = '.'.join([tld.subdomain, tld.domain])
+        # domain = '.'.join([tld.subdomain, tld.domain])
+        domain = tld.domain
+        # print(tld.subdomain, tld.domain)
 
         output_table[raw_domain] = {
                                      'categories': category_path,

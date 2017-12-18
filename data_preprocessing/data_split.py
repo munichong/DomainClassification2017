@@ -25,7 +25,7 @@ suffix2index = defaultdict(int)
 suffix_dist = Counter()
 category_domains = []
 domain_segments_len_dist = Counter()
-
+max_segment_char_len = 0
 for full_domain in json_data:
 
     ''' processing target category '''
@@ -55,6 +55,8 @@ for full_domain in json_data:
 
     # record the length of the segmented domain
     domain_segments_len_dist[len(json_data[full_domain]['segmented_domain'])] += 1
+
+    max_segment_char_len = max([max_segment_char_len, max(len(segment) for segment in json_data[full_domain]['segmented_domain'])])
 
     category_domains[target].append(json_data[full_domain])
 
@@ -101,7 +103,7 @@ pickle.dump(test_domains, open(os.path.join(OUTPUT_DIR + 'test_domains_%s.list' 
 
 
 params = {'num_targets': len(category2index), 'num_suffix': len(suffix2index), 'max_domain_segments_len': max(domain_segments_len_dist.keys()),
-          'category_dist_traintest': {cat: len(category_domains[category2index[cat]]) for cat in category2index},
+          'category_dist_traintest': {cat: len(category_domains[category2index[cat]]) for cat in category2index}, 'max_segment_char_len': max_segment_char_len,
           'num_training': n_train, 'num_validation': n_val, 'num_test': n_test}
 print(params)
 json.dump(params, open(os.path.join(OUTPUT_DIR, 'params_%s.json' % DATASET), 'w'))
