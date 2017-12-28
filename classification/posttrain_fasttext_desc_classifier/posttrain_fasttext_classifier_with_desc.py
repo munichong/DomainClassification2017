@@ -20,7 +20,8 @@ DATASET = 'content'  # 'content' or '2340768'
 
 char_ngram = 4
 
-type = 'CNN'
+domain_network_type = 'CNN/RNN'
+desc_network_type = 'CNN'
 # For RNN
 n_rnn_neurons = 300
 # For CNN
@@ -272,14 +273,19 @@ class PosttrainFasttextClassifier_with_desc:
 
 
         output_vectors = []
-        # TODO: RNN is sitll in old version
-        # if 'RNN' in type:
-        #     rnn_cell = tf.contrib.rnn.BasicRNNCell(n_rnn_neurons, activation=tf.nn.tanh)
-        #     # The shape of last_states should be [batch_size, n_lstm_neurons]
-        #     _, domain_vec_rnn = tf.nn.dynamic_rnn(rnn_cell, x_embed, sequence_length=seq_len, dtype=tf.float32, time_major=False)
-        #     domain_vec_rnn = tf.layers.dropout(domain_vec_rnn, dropout_rate, training=is_training)
-        #     domain_vectors.append(domain_vec_rnn)
-        if 'CNN' in type:
+        if 'RNN' in domain_network_type:
+            rnn_cell = tf.contrib.rnn.BasicRNNCell(n_rnn_neurons, activation=tf.nn.tanh)
+            # The shape of last_states should be [batch_size, n_lstm_neurons]
+            _, domain_vec_rnn = tf.nn.dynamic_rnn(rnn_cell, x_embed_domain, sequence_length=seq_len, dtype=tf.float32, time_major=False)
+            domain_vec_rnn = tf.layers.dropout(domain_vec_rnn, dropout_rate, training=is_training)
+
+            for _ in range(n_fc_layers):
+                logits_domain_rnn = tf.contrib.layers.fully_connected(domain_vec_rnn, num_outputs=width_fc_layers,
+                                                                  activation_fn=act_fn)
+                logits_domain_rnn = tf.layers.dropout(logits_domain_rnn, dropout_rate, training=is_training)
+            output_vectors.append(logits_domain_rnn)
+
+        if 'CNN' in domain_network_type:
             ''' CNN for domain '''
             with tf.variable_scope('cnn_domain'):
                 pooled_outputs = []
@@ -305,10 +311,11 @@ class PosttrainFasttextClassifier_with_desc:
                 domain_vec_cnn = tf.layers.dropout(domain_vec_cnn, dropout_rate, training=is_training)
 
                 for _ in range(n_fc_layers):
-                    logits_domain = tf.contrib.layers.fully_connected(domain_vec_cnn, num_outputs=width_fc_layers, activation_fn=act_fn)
-                    logits_domain = tf.layers.dropout(logits_domain, dropout_rate, training=is_training)
-                output_vectors.append(logits_domain)
+                    logits_domain_cnn = tf.contrib.layers.fully_connected(domain_vec_cnn, num_outputs=width_fc_layers, activation_fn=act_fn)
+                    logits_domain_cnn = tf.layers.dropout(logits_domain_cnn, dropout_rate, training=is_training)
+                output_vectors.append(logits_domain_cnn)
 
+        if 'CNN' in desc_network_type:
             ''' CNN for desc '''
             with tf.variable_scope('cnn_desc'):
                 pooled_outputs = []
