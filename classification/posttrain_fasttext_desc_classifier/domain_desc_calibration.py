@@ -5,6 +5,7 @@ Created on Oct 30, 2017
 '''
 import numpy as np, pickle, json, csv, os
 import tensorflow as tf
+from tensorflow.contrib import slim
 from pprint import pprint
 from random import shuffle
 from tabulate import tabulate
@@ -19,31 +20,35 @@ DATASET = 'content'  # 'content' or '2340768'
 
 char_ngram = 4
 
-autoencoder_type = 'CNN'
+domain_network_type = 'CNN'
+desc_network_type = 'CNN'
 # For RNN
 n_rnn_neurons = 300
 # For CNN
-filter_sizes = [2,1]
-num_filters = 512
+domain_filter_sizes = [2,1]
+desc_filter_sizes = [2,3]
+domain_num_filters = 256
+desc_num_filters = 256
 
-desc_word_embed_dimen = 100
 domain_char_embed_dimen = 50
+desc_word_embed_dimen = 100
+
 # n_fc_neurons = 64
 dropout_rate= 0.2
-n_fc_layers_desc= 3
-n_fc_layers_doamin = 3
+n_fc_layers= 3
+width_fc_layers = 300
 act_fn = tf.nn.relu
 
-autoencoder_reg_factor = 0.001
+calibration_reg_factor = 0.001
 
-n_epochs = 100
-batch_size = 4000
+n_epochs = 50
+batch_size = 2000
 autoencoder_lr_rate = 0.001
 
 class_weighted = False
 
 
-OUTPUT_DIR = '../Output/'
+OUTPUT_DIR = '../../Output/'
 
 category2index = pickle.load(open(os.path.join(OUTPUT_DIR + 'category2index_%s.dict' % DATASET), 'rb'))
 categories = [''] * len(category2index)
@@ -52,13 +57,13 @@ for cate, i in category2index.items():
 print(categories)
 
 # Creating the model
-print("Loading the FastText Model")
+# print("Loading the FastText Model")
 # en_model = {"test":np.array([0]*300)}
 # en_model = FastText.load_fasttext_format('../FastText/wiki.en/wiki.en')
 
 
 
-class PosttrainFastTextDescClassifier:
+class domain_desc_calibrator:
 
     def __init__(self):
         ''' load data '''
@@ -69,12 +74,8 @@ class PosttrainFastTextDescClassifier:
         self.domains_test = pickle.load(open(OUTPUT_DIR + 'test_domains_%s.list' % DATASET, 'rb'))
         self.domains_test = [d for cat_domains in self.domains_test for d in cat_domains]
 
-        self.charngram2index = defaultdict(lambda: len(self.charngram2index) + 1)  # index starts from 1. 0 is for padding
-        for domains in (self.domains_train, self.domains_val, self.domains_test):
-            for domain in domains:
-                for word in domain['segmented_domain']:
-                    for i in range(max(1, len(word) - char_ngram)):  # some segments' lengths are less than char_ngram
-                        self.charngram2index[word[i : i + char_ngram]]
+        self.charngram2index = pickle.load(open(os.path.join(OUTPUT_DIR, 'charngram2index.dict'), 'rb'))
+        self.word2index = pickle.load(open(os.path.join(OUTPUT_DIR, 'word2index.dict'), 'rb'))
 
         ''' load params '''
         self.params = json.load(open(OUTPUT_DIR + 'params_%s.json' % DATASET))
@@ -87,7 +88,7 @@ class PosttrainFastTextDescClassifier:
         rnn_output = tf.layers.dropout(rnn_output, dropout_rate, training=is_training)
         return rnn_output
 
-    def get_cnn_output(self, embed_dimen, embed, max_seq_len, is_training):
+    def get_cnn_output(self, embed_dimen, embed, max_seq_len, num_filters, filter_sizes, is_training):
         pooled_outputs = []
         for filter_size in filter_sizes:
             # Define and initialize filters
@@ -112,7 +113,7 @@ class PosttrainFastTextDescClassifier:
         return cnn_output
 
 
-    def run_autoencoder(self):
+    def run_graph(self):
         ''' INPUT '''
         is_training = tf.placeholder(tf.bool, shape=(), name='bool_train')
         # the input can be word indices or pre-trained FastText vectors
@@ -126,27 +127,33 @@ class PosttrainFastTextDescClassifier:
 
         ''' Abstractize Descriptions '''
         # embedding layers
-        desc_word_embeddings = tf.Variable(tf.random_uniform([len(self.descwords2index), desc_word_embed_dimen], -1.0, 1.0))
-        desc_word_embed = tf.nn.embedding_lookup(desc_word_embeddings, x_desc)
-        desc_word_mask = tf.placeholder(tf.float32, shape=[None, self.params['max_desc_words_len']], name='desc_mask')
-        desc_word_mask = tf.expand_dims(desc_word_mask, axis=-1)
-        desc_word_mask = tf.tile(desc_word_mask, [1,1,desc_word_embed_dimen])
-        desc_word_embed = tf.multiply(desc_word_embed, desc_word_mask)
+        desc_embeddings = tf.Variable(tf.random_uniform([len(self.word2index), desc_word_embed_dimen], -1.0, 1.0))
+        desc_embed = tf.nn.embedding_lookup(desc_embeddings, x_desc)
+        desc_mask = tf.placeholder(tf.float32, shape=[None, self.params['max_desc_words_len']], name='desc_mask')
+        desc_mask = tf.expand_dims(desc_mask, axis=-1)
+        desc_mask = tf.tile(desc_mask, [1,1,desc_word_embed_dimen])
+        x_embed_desc = tf.multiply(desc_embed, desc_mask)
 
         desc_vectors = []
-        if 'RNN' in type:
-            domain_vec_rnn = get_rnn_output(desc_word_embed, desc_len, is_training)
-            desc_vectors.append(domain_vec_rnn)
-        if 'CNN' in type:
-            domain_vec_cnn = get_cnn_output(desc_word_embed_dimen, desc_word_embed,
-                                            self.params['max_desc_words_len'], is_training)
-            desc_vectors.append(domain_vec_cnn)
+        # if 'RNN' in type:
+        #     domain_vec_rnn = self.get_rnn_output(desc_word_embed, desc_len, is_training)
+        #     desc_vectors.append(domain_vec_rnn)
+        if 'CNN' in desc_network_type:
+            with tf.variable_scope('cnn_desc'):
+                desc_vec_cnn = self.get_cnn_output(desc_word_embed_dimen, x_embed_desc,
+                                            self.params['max_desc_words_len'], desc_num_filters, desc_filter_sizes, is_training)
+
+                for _ in range(n_fc_layers):
+                    logits_desc = tf.contrib.layers.fully_connected(desc_vec_cnn, num_outputs=width_fc_layers,
+                                                                activation_fn=act_fn)
+                    logits_desc = tf.layers.dropout(logits_desc, dropout_rate, training=is_training)
+
+            desc_vectors.append(logits_desc)
+
 
         cat_layer_desc = tf.concat(desc_vectors, -1)
 
-        for _ in range(n_fc_layers_desc):
-            logits_desc = tf.contrib.layers.fully_connected(cat_layer_desc, num_outputs=n_rnn_neurons, activation_fn=act_fn)
-            logits_desc = tf.layers.dropout(logits_desc, dropout_rate, training=is_training)
+
 
 
 
@@ -159,38 +166,53 @@ class PosttrainFastTextDescClassifier:
         domain_char_mask = tf.expand_dims(domain_char_mask, axis=-1)
         domain_char_mask = tf.tile(domain_char_mask, [1,1,1,domain_char_embed_dimen])
         domain_char_embed = tf.multiply(domain_char_embed, domain_char_mask)
-        domain_char_embed = tf.reduce_sum(domain_char_embed, 2)
+        domain_char_embed = tf.reduce_mean(domain_char_embed, 2)
 
         domain_vectors = []
-        if 'RNN' in type:
-            domain_vec_rnn = get_rnn_output(domain_char_embed, domain_len, is_training)
-            desc_vectors.append(domain_vec_rnn)
-        if 'CNN' in type:
-            domain_vec_cnn = get_cnn_output(domain_char_embed_dimen, domain_char_embed,
-                                            self.params['max_domain_segments_len'], is_training)
-            desc_vectors.append(domain_vec_cnn)
+        # if 'RNN' in domain_network_type:
+        #     domain_vec_rnn = self.get_rnn_output(domain_char_embed, domain_len, is_training)
+        #     domain_vectors.append(domain_vec_rnn)
+        if 'CNN' in domain_network_type:
+            with tf.variable_scope('cnn_domain'):
+                domain_vec_cnn = self.get_cnn_output(domain_char_embed_dimen, domain_char_embed,
+                                            self.params['max_domain_segments_len'], domain_num_filters, domain_filter_sizes, is_training)
+
+                for _ in range(n_fc_layers):
+                    logits_domain = tf.contrib.layers.fully_connected(domain_vec_cnn, num_outputs=width_fc_layers,
+                                                                activation_fn=act_fn)
+                    logits_domain = tf.layers.dropout(logits_domain, dropout_rate, training=is_training)
+
+            domain_vectors.append(logits_domain)
 
         cat_layer_domain = tf.concat(domain_vectors, -1)
 
-        for _ in range(n_fc_layers_domain):
-            logits_domain = tf.contrib.layers.fully_connected(cat_layer_domain, num_outputs=n_rnn_neurons, activation_fn=act_fn)
-            logits_domain = tf.layers.dropout(logits_domain, dropout_rate, training=is_training)
 
-        reconstruction_loss = tf.reduce_mean(tf.square(logits_desc, logits_domain))  # MSE
+
+        reconstruction_loss = tf.losses.mean_squared_error(cat_layer_desc, cat_layer_domain, weights=1.0)
 
         reg_losses = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
-        loss = my_normal_loss + autoencoder_reg_factor * sum(reg_losses)
+        loss = reconstruction_loss + calibration_reg_factor * sum(reg_losses)
 
-        optimizer = tf.train.AdamOptimier(autoencoder_lr_rate)
+        optimizer = tf.train.AdamOptimizer(autoencoder_lr_rate)
         train_op = optimizer.minimize(loss)
 
-        init = tf.global_veriable_initializer()
+        init = tf.global_variables_initializer()
 
-
+        variables = slim.get_variables_to_restore()
+        variables_to_restore = {v.name: v for v in variables if v.name.split('/')[0] == 'cnn_desc'}
+        print("variables_to_restore:", sorted(variables_to_restore.keys()))
+        saver = tf.train.Saver({**{"desc_embeddings": desc_embeddings}, **variables_to_restore})
 
         with tf.Session() as sess:
             init.run()
             n_total_batches = int(np.ceil(len(self.domains_train) / batch_size))
+
+            # Restore variables from disk.
+            # saver.restore(sess, os.path.join(OUTPUT_DIR, 'desc_abstraction.params'))
+            # print("Model restored.")
+
+
+
 
 
 
@@ -200,5 +222,5 @@ class PosttrainFastTextDescClassifier:
 
 
 if __name__ == '__main__':
-    classifier = PosttrainFastTextDescClassifier()
-    classifier.run_autoencoder()
+    classifier = domain_desc_calibrator()
+    classifier.run_graph()
