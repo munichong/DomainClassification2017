@@ -202,7 +202,7 @@ class PosttrainFastTextClassifier:
         mask = tf.tile(mask, [1,1,1,embed_dimen])
         x_embed = tf.multiply(embed, mask)  # x_embed.shape: (None, self.params['max_domain_segments_len'],
                                                              # self.params['max_segment_char_len'] - char_ngram + 1, embed_dimen)
-        x_embed = tf.reduce_sum(x_embed, 2)
+        x_embed = tf.reduce_mean(x_embed, 2)
 
 
 
