@@ -224,9 +224,6 @@ class domain_desc_calibrator:
 
 
 
-
-
-
 if __name__ == '__main__':
     classifier = domain_desc_calibrator()
     classifier.run_graph()
