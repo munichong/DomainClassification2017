@@ -189,6 +189,7 @@ class domain_desc_calibrator:
 
 
 
+
         reconstruction_loss = tf.losses.mean_squared_error(cat_layer_desc, cat_layer_domain, weights=1.0)
 
         reg_losses = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
@@ -203,6 +204,9 @@ class domain_desc_calibrator:
         variables_to_restore = {v.name: v for v in tf.global_variables() if v.name.split('/')[0] == 'cnn_desc'}
         print("variables_to_restore:", sorted(variables_to_restore.keys()))
         saver = tf.train.Saver({**{"desc_embeddings": desc_embeddings}, **variables_to_restore})
+
+        ''' Make sure all variables about desc CNN are non-trainable '''
+        assert [] == [v for v in tf.trainable_variables() if v.name.split('/')[0] == 'cnn_desc']
 
         with tf.Session() as sess:
             init.run()
