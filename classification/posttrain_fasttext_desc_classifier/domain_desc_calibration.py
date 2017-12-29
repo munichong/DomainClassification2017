@@ -13,6 +13,8 @@ from collections import defaultdict
 from sklearn.metrics import precision_recall_fscore_support
 from datetime import datetime
 import warnings
+import posttrain_fasttext_classifier_with_desc as pfc
+
 warnings.filterwarnings(action='ignore', category=UserWarning, module='gensim')
 from gensim.models.wrappers import FastText
 
@@ -20,24 +22,29 @@ DATASET = 'content'  # 'content' or '2340768'
 
 char_ngram = 4
 
-domain_network_type = 'CNN'
-desc_network_type = 'CNN'
+domain_network_type = pfc.domain_network_type
+desc_network_type = pfc.desc_network_type
 # For RNN
 n_rnn_neurons = 300
 # For CNN
 domain_filter_sizes = [2,1]
-desc_filter_sizes = [2,3]
+desc_filter_sizes = pfc.desc_filter_sizes
 domain_num_filters = 256
-desc_num_filters = 256
+desc_num_filters = pfc.desc_num_filters
 
-domain_char_embed_dimen = 50
-desc_word_embed_dimen = 100
+char_embed_dimen = 50
+word_embed_dimen = pfc.word_embed_dimen
 
-# n_fc_neurons = 64
 dropout_rate= 0.2
-n_fc_layers= 3
-width_fc_layers = 300
+n_fc_layers_domain = 3
+width_fc_layers_domain = 300
+n_fc_layers_desc= pfc.n_fc_layers_desc
+width_fc_layers_desc = pfc.width_fc_layers_desc
+
 act_fn = tf.nn.relu
+
+truncated_desc_words_len = 100
+
 
 calibration_reg_factor = 0.001
 
@@ -48,13 +55,10 @@ autoencoder_lr_rate = 0.001
 class_weighted = False
 
 
-OUTPUT_DIR = '../../Output/'
+OUTPUT_DIR = pfc.OUTPUT_DIR
 
-category2index = pickle.load(open(os.path.join(OUTPUT_DIR + 'category2index_%s.dict' % DATASET), 'rb'))
-categories = [''] * len(category2index)
-for cate, i in category2index.items():
-    categories[i] = cate
-print(categories)
+category2index = pfc.category2index
+categories = pfc.categories
 
 # Creating the model
 # print("Loading the FastText Model")
@@ -67,18 +71,103 @@ class domain_desc_calibrator:
 
     def __init__(self):
         ''' load data '''
-        self.domains_train = pickle.load(open(OUTPUT_DIR + 'training_domains_%s.list' % DATASET, 'rb'))
+        origin_train_domains = pickle.load(open(OUTPUT_DIR + 'training_domains_%s.list' % DATASET, 'rb'))
+        self.domains_train = []
+        self.domains_val = []
+        self.domains_test = []
+        for domains in origin_train_domains:
+            shuffle(domains)
+            train_end_index = int(len(domains) * 0.8)
+            self.domains_train.append(domains[ : train_end_index])
+            validation_end_index = int(len(domains) * (0.8 + (1 - 0.8) / 2))
+            self.domains_val.append(domains[train_end_index : validation_end_index] )
+            self.domains_test.append(domains[validation_end_index: ])
+
+        # self.domains_train = pickle.load(open(OUTPUT_DIR + 'training_domains_%s.list' % DATASET, 'rb'))
         self.domains_train = [d for cat_domains in self.domains_train for d in cat_domains]
-        self.domains_val = pickle.load(open(OUTPUT_DIR + 'validation_domains_%s.list' % DATASET, 'rb'))
+        # self.domains_val = pickle.load(open(OUTPUT_DIR + 'validation_domains_%s.list' % DATASET, 'rb'))
         self.domains_val = [d for cat_domains in self.domains_val for d in cat_domains]
-        self.domains_test = pickle.load(open(OUTPUT_DIR + 'test_domains_%s.list' % DATASET, 'rb'))
+        # self.domains_test = pickle.load(open(OUTPUT_DIR + 'test_domains_%s.list' % DATASET, 'rb'))
         self.domains_test = [d for cat_domains in self.domains_test for d in cat_domains]
+        print(len(self.domains_train), len(self.domains_val), len(self.domains_test))
 
         self.charngram2index = pickle.load(open(os.path.join(OUTPUT_DIR, 'charngram2index.dict'), 'rb'))
         self.word2index = pickle.load(open(os.path.join(OUTPUT_DIR, 'word2index.dict'), 'rb'))
 
         ''' load params '''
         self.params = json.load(open(OUTPUT_DIR + 'params_%s.json' % DATASET))
+        self.params['max_desc_words_len'] = min(truncated_desc_words_len, self.params['max_desc_words_len'])
+        # self.compute_class_weights()
+
+
+    def next_batch(self, domains, batch_size=batch_size):
+        X_batch_domain = []
+        X_batch_domain_mask = []
+        domain_actual_lens = []
+        X_batch_desc = []
+        X_batch_desc_mask = []
+        desc_actual_lens = []
+        sample_weights = []
+        y_batch = []
+        shuffle(domains)
+        start_index = 0
+        while start_index < len(domains):
+            for i in range(start_index, min(len(domains), start_index + batch_size)):
+                ''' get char n-gram indices '''
+                embeds = []  # [[1,2,5,0,0], [35,3,7,8,4], ...]
+                # print(domains[i])
+                for word in domains[i]['segmented_domain']:
+                    embeds.append([self.charngram2index[word[start : start + char_ngram]] for start in range(max(1, len(word) - char_ngram))])
+                domain_actual_lens.append(len(embeds))
+                ''' domain char n-gram padding '''
+                # pad char-ngram level
+                embeds = [indices + [0] * (self.params['max_segment_char_len'] - char_ngram + 1 - len(indices))for indices in embeds]
+                # pad segment level
+                embeds += [[0] * (self.params['max_segment_char_len'] - char_ngram + 1) for _ in range(self.params['max_domain_segments_len'] - len(embeds))]
+                X_batch_domain.append(embeds)
+                ''' domain char n-gram mask '''
+                X_batch_domain_mask.append((np.array(embeds) != 0).astype(float))
+
+
+                ''' description '''
+                desc_indice = [self.word2index[word.lower()] for word in domains[i]['tokenized_desc'][ : self.params['max_desc_words_len']]]  # truncate
+                desc_actual_lens.append(len(desc_indice))
+                ''' description padding '''
+                if self.params['max_desc_words_len'] >= len(desc_indice):
+                    desc_indice += [0] * (self.params['max_desc_words_len'] - len(desc_indice))
+                else:
+                    desc_indice += [0] * (self.params['max_desc_words_len'] - len(desc_indice))
+                X_batch_desc.append(desc_indice)
+                # assert len(desc_indice) == self.params['max_desc_words_len']
+                ''' description mask '''
+                X_batch_desc_mask.append((np.array(desc_indice) != 0).astype(float))
+
+
+                ''' target category '''
+                sample_weights.append(self.class_weights[categories[domains[i]['target']]])
+                y_batch.append(domains[i]['target'])
+
+            # print(np.array(X_batch_desc).shape)
+            # print(np.array(X_batch_desc_mask).shape)
+            # print(X_batch_desc[:10])
+            # print(X_batch_desc_mask[:10])
+
+            yield np.array(X_batch_domain), np.array(X_batch_domain_mask), np.array(domain_actual_lens), \
+                  np.array(X_batch_desc), np.array(X_batch_desc_mask), np.array(desc_actual_lens), \
+                  np.array(sample_weights), np.array(y_batch)
+
+            # print(sample_weights)
+
+
+            X_batch_domain.clear()
+            X_batch_domain_mask.clear()
+            domain_actual_lens.clear()
+            X_batch_desc.clear()
+            X_batch_desc_mask.clear()
+            desc_actual_lens.clear()
+            sample_weights.clear()
+            y_batch.clear()
+            start_index += batch_size
 
 
     def get_rnn_output(self, embed, seq_len, is_training, trainable=True):
@@ -127,12 +216,12 @@ class domain_desc_calibrator:
 
         ''' Abstractize Descriptions (Should be all non-trainable) '''
         # embedding layers
-        desc_embeddings = tf.Variable(tf.random_uniform([len(self.word2index), desc_word_embed_dimen], -1.0, 1.0),
+        desc_embeddings = tf.Variable(tf.random_uniform([len(self.word2index), word_embed_dimen], -1.0, 1.0),
                                       trainable=False)
         desc_embed = tf.nn.embedding_lookup(desc_embeddings, x_desc)
         desc_mask = tf.placeholder(tf.float32, shape=[None, self.params['max_desc_words_len']], name='desc_mask')
         desc_mask = tf.expand_dims(desc_mask, axis=-1)
-        desc_mask = tf.tile(desc_mask, [1,1,desc_word_embed_dimen])
+        desc_mask = tf.tile(desc_mask, [1,1,word_embed_dimen])
         x_embed_desc = tf.multiply(desc_embed, desc_mask)
 
         desc_vectors = []
@@ -141,11 +230,11 @@ class domain_desc_calibrator:
         #     desc_vectors.append(domain_vec_rnn)
         if 'CNN' in desc_network_type:
             with tf.variable_scope('cnn_desc'):
-                desc_vec_cnn = self.get_cnn_output(desc_word_embed_dimen, x_embed_desc,
+                desc_vec_cnn = self.get_cnn_output(word_embed_dimen, x_embed_desc,
                                             self.params['max_desc_words_len'], desc_num_filters, desc_filter_sizes, is_training, trainable=False)
 
-                for _ in range(n_fc_layers):
-                    logits_desc = tf.contrib.layers.fully_connected(desc_vec_cnn, num_outputs=width_fc_layers,
+                for _ in range(n_fc_layers_desc):
+                    logits_desc = tf.contrib.layers.fully_connected(desc_vec_cnn, num_outputs=width_fc_layers_desc,
                                                                 activation_fn=act_fn, trainable=False)
                     logits_desc = tf.layers.dropout(logits_desc, dropout_rate, training=is_training)
 
@@ -160,14 +249,14 @@ class domain_desc_calibrator:
 
         ''' Abstractize Domains '''
         # embedding layers
-        domain_char_embeddings = tf.Variable(tf.random_uniform([len(self.charngram2index), domain_char_embed_dimen], -1.0, 1.0))
-        domain_char_embed = tf.nn.embedding_lookup(domain_char_embeddings, x_domain)
-        domain_char_mask = tf.placeholder(tf.float32, shape=[None, self.params['max_domain_segments_len'],
+        domain_embeddings = tf.Variable(tf.random_uniform([len(self.charngram2index), char_embed_dimen], -1.0, 1.0))
+        domain_embed = tf.nn.embedding_lookup(domain_embeddings, x_domain)
+        domain_mask = tf.placeholder(tf.float32, shape=[None, self.params['max_domain_segments_len'],
                                                  self.params['max_segment_char_len'] - char_ngram + 1], name='domain_mask')
-        domain_char_mask = tf.expand_dims(domain_char_mask, axis=-1)
-        domain_char_mask = tf.tile(domain_char_mask, [1,1,1,domain_char_embed_dimen])
-        domain_char_embed = tf.multiply(domain_char_embed, domain_char_mask)
-        domain_char_embed = tf.reduce_mean(domain_char_embed, 2)
+        domain_mask = tf.expand_dims(domain_mask, axis=-1)
+        domain_mask = tf.tile(domain_mask, [1,1,1,char_embed_dimen])
+        domain_embed = tf.multiply(domain_embed, domain_mask)
+        domain_embed = tf.reduce_mean(domain_embed, 2)
 
         domain_vectors = []
         # if 'RNN' in domain_network_type:
@@ -175,11 +264,11 @@ class domain_desc_calibrator:
         #     domain_vectors.append(domain_vec_rnn)
         if 'CNN' in domain_network_type:
             with tf.variable_scope('cnn_domain'):
-                domain_vec_cnn = self.get_cnn_output(domain_char_embed_dimen, domain_char_embed,
+                domain_vec_cnn = self.get_cnn_output(char_embed_dimen, domain_embed,
                                             self.params['max_domain_segments_len'], domain_num_filters, domain_filter_sizes, is_training)
 
-                for _ in range(n_fc_layers):
-                    logits_domain = tf.contrib.layers.fully_connected(domain_vec_cnn, num_outputs=width_fc_layers,
+                for _ in range(n_fc_layers_domain):
+                    logits_domain = tf.contrib.layers.fully_connected(domain_vec_cnn, num_outputs=width_fc_layers_domain,
                                                                 activation_fn=act_fn)
                     logits_domain = tf.layers.dropout(logits_domain, dropout_rate, training=is_training)
 
@@ -189,14 +278,13 @@ class domain_desc_calibrator:
 
 
 
-
         reconstruction_loss = tf.losses.mean_squared_error(cat_layer_desc, cat_layer_domain, weights=1.0)
 
         reg_losses = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
         loss = reconstruction_loss + calibration_reg_factor * sum(reg_losses)
 
         optimizer = tf.train.AdamOptimizer(autoencoder_lr_rate)
-        train_op = optimizer.minimize(loss)
+        training_op = optimizer.minimize(loss)
 
         init = tf.global_variables_initializer()
 
@@ -210,15 +298,36 @@ class domain_desc_calibrator:
 
         with tf.Session() as sess:
             init.run()
-            n_total_batches = int(np.ceil(len(self.domains_train) / batch_size))
 
             # Restore variables from disk.
             saver.restore(sess, os.path.join(OUTPUT_DIR, 'desc_abstraction.params'))
             print("Model restored.")
             print(desc_embeddings.eval())
 
+            n_total_batches = int(np.ceil(len(self.domains_train) / batch_size))
+            for epoch in range(1, n_epochs + 1):
+                # model training
+                n_batch = 0
+                for X_batch_domain, X_batch_domain_mask, domain_actual_lens, \
+                    X_batch_desc, X_batch_desc_mask, desc_actual_lens, \
+                    sample_weights, y_batch in self.next_batch(self.domains_train):
+                    _, loss_batch_train = sess.run([training_op, loss],
+                                                    feed_dict={
+                                                        'bool_train:0': True,
+                                                        'domain_input:0': X_batch_domain,
+                                                        'domain_mask:0': X_batch_domain_mask,
+                                                        'domain_length:0': domain_actual_lens,
+                                                        'desc_input:0': X_batch_desc,
+                                                        'desc_mask:0': X_batch_desc_mask,
+                                                        'desc_length:0': desc_actual_lens,
+                                                        'weight:0': sample_weights,
+                                                        'target:0': y_batch})
 
-
+                    n_batch += 1
+                    if epoch < 2:
+                        # print(prediction_train)
+                        print("Epoch %d - Batch %d/%d: loss = %.4f" %
+                              (epoch, n_batch, n_total_batches, loss_batch_train))
 
 
 
