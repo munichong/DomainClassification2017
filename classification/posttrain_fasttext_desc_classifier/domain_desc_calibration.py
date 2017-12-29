@@ -81,20 +81,20 @@ class domain_desc_calibrator:
         self.params = json.load(open(OUTPUT_DIR + 'params_%s.json' % DATASET))
 
 
-    def get_rnn_output(self, embed, seq_len, is_training):
+    def get_rnn_output(self, embed, seq_len, is_training, trainable=True):
         rnn_cell = tf.contrib.rnn.BasicRNNCell(n_rnn_neurons, activation=tf.nn.tanh)
         # The shape of last_states should be [batch_size, n_lstm_neurons]
         _, rnn_output = tf.nn.dynamic_rnn(rnn_cell, embed, sequence_length=seq_len, dtype=tf.float32, time_major=False)
         rnn_output = tf.layers.dropout(rnn_output, dropout_rate, training=is_training)
         return rnn_output
 
-    def get_cnn_output(self, embed_dimen, embed, max_seq_len, num_filters, filter_sizes, is_training):
+    def get_cnn_output(self, embed_dimen, embed, max_seq_len, num_filters, filter_sizes, is_training, trainable=True):
         pooled_outputs = []
         for filter_size in filter_sizes:
             # Define and initialize filters
             filter_shape = [filter_size, embed_dimen, 1, num_filters]
-            W_filter = tf.Variable(tf.truncated_normal(filter_shape, stddev=0.1)) # initialize the filters' weights
-            b_filter = tf.Variable(tf.constant(0.1, shape=[num_filters]))  # initialize the filters' biases
+            W_filter = tf.Variable(tf.truncated_normal(filter_shape, stddev=0.1), trainable=trainable) # initialize the filters' weights
+            b_filter = tf.Variable(tf.constant(0.1, shape=[num_filters]), trainable=trainable)  # initialize the filters' biases
             # The conv2d operation expects a 4-D tensor with dimensions corresponding to batch, width, height and channel.
             # The result of our embedding doesnâ€™t contain the channel dimension
             # So we add it manually, leaving us with a layer of shape [None, sequence_length, embedding_size, 1].
@@ -125,9 +125,10 @@ class domain_desc_calibrator:
         domain_len = tf.placeholder(tf.int32, shape=[None], name='domain_length')
 
 
-        ''' Abstractize Descriptions '''
+        ''' Abstractize Descriptions (Should be all non-trainable) '''
         # embedding layers
-        desc_embeddings = tf.Variable(tf.random_uniform([len(self.word2index), desc_word_embed_dimen], -1.0, 1.0))
+        desc_embeddings = tf.Variable(tf.random_uniform([len(self.word2index), desc_word_embed_dimen], -1.0, 1.0),
+                                      trainable=False)
         desc_embed = tf.nn.embedding_lookup(desc_embeddings, x_desc)
         desc_mask = tf.placeholder(tf.float32, shape=[None, self.params['max_desc_words_len']], name='desc_mask')
         desc_mask = tf.expand_dims(desc_mask, axis=-1)
@@ -141,11 +142,11 @@ class domain_desc_calibrator:
         if 'CNN' in desc_network_type:
             with tf.variable_scope('cnn_desc'):
                 desc_vec_cnn = self.get_cnn_output(desc_word_embed_dimen, x_embed_desc,
-                                            self.params['max_desc_words_len'], desc_num_filters, desc_filter_sizes, is_training)
+                                            self.params['max_desc_words_len'], desc_num_filters, desc_filter_sizes, is_training, trainable=False)
 
                 for _ in range(n_fc_layers):
                     logits_desc = tf.contrib.layers.fully_connected(desc_vec_cnn, num_outputs=width_fc_layers,
-                                                                activation_fn=act_fn)
+                                                                activation_fn=act_fn, trainable=False)
                     logits_desc = tf.layers.dropout(logits_desc, dropout_rate, training=is_training)
 
             desc_vectors.append(logits_desc)
@@ -198,8 +199,8 @@ class domain_desc_calibrator:
 
         init = tf.global_variables_initializer()
 
-        variables = slim.get_variables_to_restore()
-        variables_to_restore = {v.name: v for v in variables if v.name.split('/')[0] == 'cnn_desc'}
+
+        variables_to_restore = {v.name: v for v in tf.global_variables() if v.name.split('/')[0] == 'cnn_desc'}
         print("variables_to_restore:", sorted(variables_to_restore.keys()))
         saver = tf.train.Saver({**{"desc_embeddings": desc_embeddings}, **variables_to_restore})
 
@@ -208,8 +209,9 @@ class domain_desc_calibrator:
             n_total_batches = int(np.ceil(len(self.domains_train) / batch_size))
 
             # Restore variables from disk.
-            # saver.restore(sess, os.path.join(OUTPUT_DIR, 'desc_abstraction.params'))
-            # print("Model restored.")
+            saver.restore(sess, os.path.join(OUTPUT_DIR, 'desc_abstraction.params'))
+            print("Model restored.")
+            print(desc_embeddings.eval())
 
 
 
