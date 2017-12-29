@@ -86,18 +86,19 @@ class PosttrainFasttextClassifier_with_desc:
         self.domains_test = [d for cat_domains in self.domains_test for d in cat_domains]
         print(len(self.domains_train), len(self.domains_val), len(self.domains_test))
 
-        self.charngram2index = defaultdict()  # index starts from 1. 0 is for padding
-        self.word2index = defaultdict()  # index starts from 1. 0 is for padding
+        self.charngram2index = defaultdict(int)  # index starts from 1. 0 is for padding
+        self.word2index = defaultdict(int)  # index starts from 1. 0 is for padding
 
         for domains in (self.domains_train, self.domains_val, self.domains_test):
             for domain in domains:
                 for word in domain['segmented_domain']:
                     for i in range(max(1, len(word) - char_ngram)):  # some segments' lengths are less than char_ngram
-                        self.charngram2index[word[i : i + char_ngram]] = len(self.charngram2index) + 1
+                        self.charngram2index[word[i: i + char_ngram]] = len(self.charngram2index) + 1
                 for word in domain['tokenized_desc']:
                     self.word2index[word.lower()] = len(self.word2index) + 1
-        pickle.dump(self.charngram2index, open(os.path.join(OUTPUT_DIR, 'charngram2index.dict'), 'wb'))
+        pickle.dump(self.charngram2index,open(os.path.join(OUTPUT_DIR, 'charngram2index.dict'), 'wb'))
         pickle.dump(self.word2index, open(os.path.join(OUTPUT_DIR, 'word2index.dict'), 'wb'))
+        print("charngram2index and word2index have been updated !!!")
 
         ''' load params '''
         self.params = json.load(open(OUTPUT_DIR + 'params_%s.json' % DATASET))
@@ -317,8 +318,6 @@ class PosttrainFasttextClassifier_with_desc:
                     logits_domain_cnn = tf.layers.dropout(logits_domain_cnn, dropout_rate, training=is_training)
                 output_vectors.append(logits_domain_cnn)
 
-
-
         if 'CNN' in desc_network_type:
             ''' CNN for desc '''
             with tf.variable_scope('cnn_desc'):
@@ -477,7 +476,7 @@ class PosttrainFasttextClassifier_with_desc:
 
 
                 if not val_fscore_history or fscores_macro > max(val_fscore_history):
-                    saver.save(sess, os.path.join(OUTPUT_DIR, 'desc_abstraction'))
+                    saver.save(sess, os.path.join(OUTPUT_DIR, 'desc_abstraction.params'))
                 val_fscore_history.append(fscores_macro)
 
 
