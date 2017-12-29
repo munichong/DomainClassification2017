@@ -311,8 +311,12 @@ class domain_desc_calibrator:
 
 
         variables_to_restore = {v.name: v for v in tf.global_variables() if v.name.split('/')[0] == 'cnn_desc'}
-        print("variables_to_restore:", sorted(variables_to_restore.keys()))
-        saver = tf.train.Saver({**{"desc_embeddings": desc_embeddings}, **variables_to_restore})
+        print("variables_to_restore:", ['desc_embeddings'] + sorted(variables_to_restore.keys()))
+        saver_for_desc_restore = tf.train.Saver({**{"desc_embeddings" : desc_embeddings}, **variables_to_restore})
+
+        variables_to_save = {v.name: v for v in tf.global_variables() if v.name.split('/')[0] == 'cnn_domain'}
+        print("variables_to_save:", ['domain_embeddings'] + sorted(variables_to_save.keys()))
+        saver_for_domain_save = tf.train.Saver({**{'domain_embeddings' : domain_embeddings}, **variables_to_save})
 
         ''' Make sure all variables about desc CNN are non-trainable '''
         assert [] == [v for v in tf.trainable_variables() if v.name.split('/')[0] == 'cnn_desc']
@@ -321,11 +325,12 @@ class domain_desc_calibrator:
             init.run()
 
             # Restore variables from disk.
-            saver.restore(sess, os.path.join(OUTPUT_DIR, 'desc_abstraction.params'))
+            saver_for_desc_restore.restore(sess, os.path.join(OUTPUT_DIR, 'desc_abstraction.params'))
             print("Model restored.")
-            print(desc_embeddings.eval())
+            # print(desc_embeddings.eval())
 
             n_total_batches = int(np.ceil(len(self.domains_train) / batch_size))
+            test_loss_history = []
             for epoch in range(1, n_epochs + 1):
                 # model training
                 n_batch = 0
@@ -373,6 +378,12 @@ class domain_desc_calibrator:
             loss_test = self.evaluate(self.domains_test, sess, eval_nodes)
             print("*** On Test Set:\tloss = %.6f" % (loss_test))
 
+
+            if not test_loss_history or loss_test < min(test_loss_history):
+                saver_for_domain_save.save(sess, os.path.join(OUTPUT_DIR, 'domain_abstraction.params'))
+                print('Save on the disk at %s' % datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+
+            test_loss_history.append(loss_test)
 
 
 

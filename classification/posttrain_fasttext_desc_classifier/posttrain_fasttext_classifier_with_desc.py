@@ -30,11 +30,15 @@ desc_filter_sizes = [2,3]
 domain_num_filters = 256
 desc_num_filters = 256
 
-char_embed_dimen = 40
+char_embed_dimen = 50
 word_embed_dimen = 100
 # n_fc_neurons = 64
 dropout_rate= 0.2
-n_fc_layers= 3
+n_fc_layers_domain= 3
+width_fc_layers_domain = 300
+n_fc_layers_desc = 3
+width_fc_layers_desc = 300
+n_fc_layers = 1
 width_fc_layers = 300
 act_fn = tf.nn.relu
 
@@ -86,24 +90,25 @@ class PosttrainFasttextClassifier_with_desc:
         self.domains_test = [d for cat_domains in self.domains_test for d in cat_domains]
         print(len(self.domains_train), len(self.domains_val), len(self.domains_test))
 
+
+        ''' convert char n-gram and words to indice, respectively '''
         self.charngram2index = defaultdict(int)  # index starts from 1. 0 is for padding
         self.word2index = defaultdict(int)  # index starts from 1. 0 is for padding
-
         for domains in (self.domains_train, self.domains_val, self.domains_test):
             for domain in domains:
                 for word in domain['segmented_domain']:
                     for i in range(max(1, len(word) - char_ngram)):  # some segments' lengths are less than char_ngram
-                        self.charngram2index[word[i: i + char_ngram]] = len(self.charngram2index) + 1
+                        self.charngram2index[word[i : i + char_ngram]] = len(self.charngram2index) + 1
                 for word in domain['tokenized_desc']:
                     self.word2index[word.lower()] = len(self.word2index) + 1
-        pickle.dump(self.charngram2index,open(os.path.join(OUTPUT_DIR, 'charngram2index.dict'), 'wb'))
+        pickle.dump(self.charngram2index, open(os.path.join(OUTPUT_DIR, 'charngram2index.dict'), 'wb'))
         pickle.dump(self.word2index, open(os.path.join(OUTPUT_DIR, 'word2index.dict'), 'wb'))
         print("charngram2index and word2index have been updated !!!")
 
         ''' load params '''
         self.params = json.load(open(OUTPUT_DIR + 'params_%s.json' % DATASET))
         self.params['max_desc_words_len'] = min(truncated_desc_words_len, self.params['max_desc_words_len'])
-        self.compute_class_weights()
+        # self.compute_class_weights()
 
     def compute_class_weights(self):
         n_total = sum(self.params['category_dist_traintest'].values())
@@ -282,8 +287,8 @@ class PosttrainFasttextClassifier_with_desc:
             _, domain_vec_rnn = tf.nn.dynamic_rnn(rnn_cell, x_embed_domain, sequence_length=seq_len, dtype=tf.float32, time_major=False)
             domain_vec_rnn = tf.layers.dropout(domain_vec_rnn, dropout_rate, training=is_training)
 
-            for _ in range(n_fc_layers):
-                logits_domain_rnn = tf.contrib.layers.fully_connected(domain_vec_rnn, num_outputs=width_fc_layers,
+            for _ in range(n_fc_layers_domain):
+                logits_domain_rnn = tf.contrib.layers.fully_connected(domain_vec_rnn, num_outputs=width_fc_layers_domain,
                                                                   activation_fn=act_fn)
                 logits_domain_rnn = tf.layers.dropout(logits_domain_rnn, dropout_rate, training=is_training)
             output_vectors.append(logits_domain_rnn)
@@ -313,10 +318,13 @@ class PosttrainFasttextClassifier_with_desc:
                 domain_vec_cnn = tf.reshape(h_pool, [-1, domain_num_filters_total])
                 domain_vec_cnn = tf.layers.dropout(domain_vec_cnn, dropout_rate, training=is_training)
 
-                for _ in range(n_fc_layers):
-                    logits_domain_cnn = tf.contrib.layers.fully_connected(domain_vec_cnn, num_outputs=width_fc_layers, activation_fn=act_fn)
+                for _ in range(n_fc_layers_domain):
+                    logits_domain_cnn = tf.contrib.layers.fully_connected(domain_vec_cnn, num_outputs=width_fc_layers_domain, activation_fn=act_fn)
                     logits_domain_cnn = tf.layers.dropout(logits_domain_cnn, dropout_rate, training=is_training)
                 output_vectors.append(logits_domain_cnn)
+
+
+
 
         if 'CNN' in desc_network_type:
             ''' CNN for desc '''
@@ -349,8 +357,8 @@ class PosttrainFasttextClassifier_with_desc:
                 desc_vec_cnn = tf.reshape(h_pool, [-1, desc_num_filters_total])
                 desc_vec_cnn = tf.layers.dropout(desc_vec_cnn, dropout_rate, training=is_training)
 
-                for _ in range(n_fc_layers):
-                    logits_desc = tf.contrib.layers.fully_connected(desc_vec_cnn, num_outputs=width_fc_layers, activation_fn=act_fn)
+                for _ in range(n_fc_layers_desc):
+                    logits_desc = tf.contrib.layers.fully_connected(desc_vec_cnn, num_outputs=width_fc_layers_desc, activation_fn=act_fn)
                     logits_desc = tf.layers.dropout(logits_desc, dropout_rate, training=is_training)
                 output_vectors.append(logits_desc)
 
@@ -361,7 +369,7 @@ class PosttrainFasttextClassifier_with_desc:
         cat_layer = tf.concat(output_vectors + [x_suffix], -1)
 
 
-        for _ in range(1):
+        for _ in range(n_fc_layers):
             logits = tf.contrib.layers.fully_connected(cat_layer, num_outputs=width_fc_layers, activation_fn=act_fn)
             logits = tf.layers.dropout(logits, dropout_rate, training=is_training)
 
@@ -395,7 +403,7 @@ class PosttrainFasttextClassifier_with_desc:
         '''
         variables = slim.get_variables_to_restore()
         variables_to_restore = {v.name : v for v in variables if v.name.split('/')[0] == 'cnn_desc'}
-        print("variables_to_restore:", variables_to_restore.keys())
+        print("variables_to_restore:", ['desc_embeddings'] + sorted(variables_to_restore.keys()))
         saver = tf.train.Saver({**{"desc_embeddings": desc_embeddings}, **variables_to_restore})
 
 
@@ -439,14 +447,19 @@ class PosttrainFasttextClassifier_with_desc:
                               (epoch, n_batch, n_total_batches, loss_batch_train, acc_batch_train))
 
 
-                # evaluation on training data
+                ''''''''''''''''''''''''''''''''''''
+                ''' evaluation on training data '''
+                ''''''''''''''''''''''''''''''''''''
                 eval_nodes = [n_correct, loss_mean, is_correct, prediction]
                 print()
                 print("========== Evaluation at Epoch %d ==========" % epoch)
                 loss_train, acc_train, _, _ = self.evaluate(self.domains_train, sess, eval_nodes)
                 print("*** On Training Set:\tloss = %.6f\taccuracy = %.4f" % (loss_train, acc_train))
 
-                # evaluation on validation data
+
+                ''''''''''''''''''''''''''''''''''''''
+                ''' evaluation on validation data '''
+                ''''''''''''''''''''''''''''''''''''''
                 loss_val, acc_val, _, pred_val = self.evaluate(self.domains_val, sess, eval_nodes)
                 print("*** On Validation Set:\tloss = %.6f\taccuracy = %.4f" % (loss_val, acc_val))
 
@@ -469,7 +482,9 @@ class PosttrainFasttextClassifier_with_desc:
                 print()
 
 
-                # evaluate on test data
+                ''''''''''''''''''''''''''''''
+                ''' evaluate on test data '''
+                ''''''''''''''''''''''''''''''
                 loss_test, acc_test, is_correct_test, pred_test = self.evaluate(self.domains_test, sess, eval_nodes)
                 print("*** On Test Set:\tloss = %.6f\taccuracy = %.4f" % (loss_test, acc_test))
 
