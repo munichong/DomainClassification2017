@@ -170,6 +170,27 @@ class domain_desc_calibrator:
             start_index += batch_size
 
 
+    def evaluate(self, data, session, eval_nodes):
+        total_loss = 0
+        for X_batch_domain, X_batch_domain_mask, domain_actual_lens, \
+            X_batch_desc, X_batch_desc_mask, desc_actual_lens, \
+            sample_weights, y_batch in self.next_batch(data):
+            batch_loss = session.run(eval_nodes,
+                                              feed_dict={
+                                                        'bool_train:0': True,
+                                                        'domain_input:0': X_batch_domain,
+                                                        'domain_mask:0': X_batch_domain_mask,
+                                                        'domain_length:0': domain_actual_lens,
+                                                        'desc_input:0': X_batch_desc,
+                                                        'desc_mask:0': X_batch_desc_mask,
+                                                        'desc_length:0': desc_actual_lens,
+                                                        'weight:0': sample_weights,
+                                                        'target:0': y_batch})
+            total_loss += batch_loss
+        return total_loss / len(data)
+
+
+
     def get_rnn_output(self, embed, seq_len, is_training, trainable=True):
         rnn_cell = tf.contrib.rnn.BasicRNNCell(n_rnn_neurons, activation=tf.nn.tanh)
         # The shape of last_states should be [batch_size, n_lstm_neurons]
@@ -331,8 +352,30 @@ class domain_desc_calibrator:
 
 
 
+            ''''''''''''''''''''''''''''''''''''
+            ''' evaluation on training data '''
+            ''''''''''''''''''''''''''''''''''''
+            eval_nodes = [loss]
+            print()
+            print("========== Evaluation at Epoch %d ==========" % epoch)
+            loss_train = self.evaluate(self.domains_train, sess, eval_nodes)
+            print("*** On Training Set:\tloss = %.6f" % (loss_train))
+
+            ''''''''''''''''''''''''''''''''''''''
+            ''' evaluation on validation data '''
+            ''''''''''''''''''''''''''''''''''''''
+            loss_val = self.evaluate(self.domains_val, sess, eval_nodes)
+            print("*** On Validation Set:\tloss = %.6f" % (loss_val))
+
+            ''''''''''''''''''''''''''''''''''''''
+            ''' evaluation on test data '''
+            ''''''''''''''''''''''''''''''''''''''
+            loss_test = self.evaluate(self.domains_test, sess, eval_nodes)
+            print("*** On Test Set:\tloss = %.6f" % (loss_test))
+
+
 
 
 if __name__ == '__main__':
-    classifier = domain_desc_calibrator()
-    classifier.run_graph()
+    calibrator = domain_desc_calibrator()
+    calibrator.run_graph()
