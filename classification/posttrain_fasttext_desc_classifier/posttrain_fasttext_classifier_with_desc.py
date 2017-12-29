@@ -30,7 +30,7 @@ desc_filter_sizes = [2,3]
 domain_num_filters = 256
 desc_num_filters = 256
 
-char_embed_dimen = 50
+char_embed_dimen = 40
 word_embed_dimen = 100
 # n_fc_neurons = 64
 dropout_rate= 0.2
@@ -477,6 +477,8 @@ class PosttrainFasttextClassifier_with_desc:
 
                 if not val_fscore_history or fscores_macro > max(val_fscore_history):
                     saver.save(sess, os.path.join(OUTPUT_DIR, 'desc_abstraction.params'))
+                    print('Save on the disk at %s' % datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+
                 val_fscore_history.append(fscores_macro)
 
 
