@@ -108,7 +108,7 @@ class PosttrainFasttextClassifier_with_desc:
         ''' load params '''
         self.params = json.load(open(OUTPUT_DIR + 'params_%s.json' % DATASET))
         self.params['max_desc_words_len'] = min(truncated_desc_words_len, self.params['max_desc_words_len'])
-        # self.compute_class_weights()
+        self.compute_class_weights()
 
     def compute_class_weights(self):
         n_total = sum(self.params['category_dist_traintest'].values())
@@ -201,6 +201,7 @@ class PosttrainFasttextClassifier_with_desc:
         total_loss = 0
         total_bool = []
         total_pred = []
+        n_batch = 0
         for X_batch_embed, X_batch_mask, domain_actual_lens, X_batch_desc, X_batch_desc_mask, X_batch_suf, sample_weights, y_batch in self.next_batch(data):
             batch_correct, batch_loss, batch_bool, batch_pred = session.run(eval_nodes,
                                                          feed_dict={
@@ -219,7 +220,8 @@ class PosttrainFasttextClassifier_with_desc:
             total_correct += batch_correct
             total_bool.extend(batch_bool)
             total_pred.extend(batch_pred)
-        return total_loss / len(data), total_correct / len(data), total_bool, total_pred
+            n_batch += 1
+        return total_loss / n_batch, total_correct / n_batch, total_bool, total_pred
 
 
 
