@@ -29,27 +29,28 @@ n_rnn_neurons = 300
 # For CNN
 domain_filter_sizes = [2,1]
 desc_filter_sizes = pfc.desc_filter_sizes
-domain_num_filters = 256
+domain_num_filters = 512
 desc_num_filters = pfc.desc_num_filters
 
 char_embed_dimen = 50
 word_embed_dimen = pfc.word_embed_dimen
 
-dropout_rate= 0.2
+dropout_rate= 0.0  # dropout leads to worse performance
 n_fc_layers_domain = 3
-width_fc_layers_domain = 300
+width_fc_layers_domain = 1200
 n_fc_layers_desc= pfc.n_fc_layers_desc
 width_fc_layers_desc = pfc.width_fc_layers_desc
+width_final_rep = pfc.width_fc_layers_desc
 
 act_fn = tf.nn.relu
 
-truncated_desc_words_len = 100
+truncated_desc_words_len = pfc.truncated_desc_words_len
 
 
-calibration_reg_factor = 0.001
+calibration_reg_factor = 0.00  # regularization leads to worse performance
 
-n_epochs = 50
-batch_size = 2000
+n_epochs = 20
+batch_size = 64
 autoencoder_lr_rate = 0.001
 
 class_weighted = False
@@ -97,8 +98,18 @@ class domain_desc_calibrator:
         ''' load params '''
         self.params = json.load(open(OUTPUT_DIR + 'params_%s.json' % DATASET))
         self.params['max_desc_words_len'] = min(truncated_desc_words_len, self.params['max_desc_words_len'])
-        # self.compute_class_weights()
+        self.compute_class_weights()
 
+    def compute_class_weights(self):
+        n_total = sum(self.params['category_dist_traintest'].values())
+        n_class = len(self.params['category_dist_traintest'])
+        self.class_weights = {cat: max(min( n_total / (n_class * self.params['category_dist_traintest'][cat]), 1.5), 0.5)
+                              for cat, size in self.params['category_dist_traintest'].items()}
+        # self.class_weights['Sports'] = 1
+        # self.class_weights['Health'] = 1
+        # self.class_weights['Business'] = 0.8
+        # self.class_weights['Arts'] = 0.8
+        pprint(self.class_weights)
 
     def next_batch(self, domains, batch_size=batch_size):
         X_batch_domain = []
@@ -172,10 +183,12 @@ class domain_desc_calibrator:
 
     def evaluate(self, data, session, eval_nodes):
         total_loss = 0
+        n_batch = 0
         for X_batch_domain, X_batch_domain_mask, domain_actual_lens, \
             X_batch_desc, X_batch_desc_mask, desc_actual_lens, \
             sample_weights, y_batch in self.next_batch(data):
-            batch_loss = session.run(eval_nodes,
+
+            batch_loss, = session.run(eval_nodes,
                                               feed_dict={
                                                         'bool_train:0': True,
                                                         'domain_input:0': X_batch_domain,
@@ -187,7 +200,8 @@ class domain_desc_calibrator:
                                                         'weight:0': sample_weights,
                                                         'target:0': y_batch})
             total_loss += batch_loss
-        return total_loss / len(data)
+            n_batch += 1
+        return total_loss / n_batch
 
 
 
@@ -234,6 +248,10 @@ class domain_desc_calibrator:
         desc_len = tf.placeholder(tf.int32, shape=[None], name='desc_length')
         domain_len = tf.placeholder(tf.int32, shape=[None], name='domain_length')
 
+        sample_weights = tf.placeholder(tf.float32, shape=[None], name='weight')
+        y = tf.placeholder(tf.int32, shape=[None],
+                           name='target')  # Each entry in y must be an index in [0, num_classes)
+
 
         ''' Abstractize Descriptions (Should be all non-trainable) '''
         # embedding layers
@@ -254,10 +272,15 @@ class domain_desc_calibrator:
                 desc_vec_cnn = self.get_cnn_output(word_embed_dimen, x_embed_desc,
                                             self.params['max_desc_words_len'], desc_num_filters, desc_filter_sizes, is_training, trainable=False)
 
-                for _ in range(n_fc_layers_desc):
+                # for _ in range(n_fc_layers_desc):
+                for _ in range(n_fc_layers_desc - 1):
                     logits_desc = tf.contrib.layers.fully_connected(desc_vec_cnn, num_outputs=width_fc_layers_desc,
                                                                 activation_fn=act_fn, trainable=False)
                     logits_desc = tf.layers.dropout(logits_desc, dropout_rate, training=is_training)
+
+                # logits_desc = tf.contrib.layers.fully_connected(logits_desc, num_outputs=width_final_rep,
+                #                                                 activation_fn=act_fn, trainable=False)
+                # logits_desc = tf.layers.dropout(logits_desc, dropout_rate, training=is_training)
 
             desc_vectors.append(logits_desc)
 
@@ -288,10 +311,14 @@ class domain_desc_calibrator:
                 domain_vec_cnn = self.get_cnn_output(char_embed_dimen, domain_embed,
                                             self.params['max_domain_segments_len'], domain_num_filters, domain_filter_sizes, is_training)
 
-                for _ in range(n_fc_layers_domain):
+                for _ in range(n_fc_layers_domain - 1):
                     logits_domain = tf.contrib.layers.fully_connected(domain_vec_cnn, num_outputs=width_fc_layers_domain,
                                                                 activation_fn=act_fn)
                     logits_domain = tf.layers.dropout(logits_domain, dropout_rate, training=is_training)
+
+                logits_domain = tf.contrib.layers.fully_connected(logits_domain, num_outputs=width_final_rep,
+                                                                  activation_fn=act_fn)
+                logits_domain = tf.layers.dropout(logits_domain, dropout_rate, training=is_training)
 
             domain_vectors.append(logits_domain)
 
@@ -309,6 +336,8 @@ class domain_desc_calibrator:
 
         init = tf.global_variables_initializer()
 
+        print('Trainable Variables:')
+        print(tf.trainable_variables())
 
         variables_to_restore = {v.name: v for v in tf.global_variables() if v.name.split('/')[0] == 'cnn_desc'}
         print("variables_to_restore:", ['desc_embeddings'] + sorted(variables_to_restore.keys()))
@@ -357,33 +386,33 @@ class domain_desc_calibrator:
 
 
 
-            ''''''''''''''''''''''''''''''''''''
-            ''' evaluation on training data '''
-            ''''''''''''''''''''''''''''''''''''
-            eval_nodes = [loss]
-            print()
-            print("========== Evaluation at Epoch %d ==========" % epoch)
-            loss_train = self.evaluate(self.domains_train, sess, eval_nodes)
-            print("*** On Training Set:\tloss = %.6f" % (loss_train))
+                ''''''''''''''''''''''''''''''''''''
+                ''' evaluation on training data '''
+                ''''''''''''''''''''''''''''''''''''
+                eval_nodes = [loss]
+                print()
+                print("========== Evaluation at Epoch %d ==========" % epoch)
+                loss_train = self.evaluate(self.domains_train, sess, eval_nodes)
+                print("*** On Training Set:\tloss = %.6f" % (loss_train))
 
-            ''''''''''''''''''''''''''''''''''''''
-            ''' evaluation on validation data '''
-            ''''''''''''''''''''''''''''''''''''''
-            loss_val = self.evaluate(self.domains_val, sess, eval_nodes)
-            print("*** On Validation Set:\tloss = %.6f" % (loss_val))
+                ''''''''''''''''''''''''''''''''''''''
+                ''' evaluation on validation data '''
+                ''''''''''''''''''''''''''''''''''''''
+                loss_val = self.evaluate(self.domains_val, sess, eval_nodes)
+                print("*** On Validation Set:\tloss = %.6f" % (loss_val))
 
-            ''''''''''''''''''''''''''''''''''''''
-            ''' evaluation on test data '''
-            ''''''''''''''''''''''''''''''''''''''
-            loss_test = self.evaluate(self.domains_test, sess, eval_nodes)
-            print("*** On Test Set:\tloss = %.6f" % (loss_test))
+                ''''''''''''''''''''''''''''''''''''''
+                ''' evaluation on test data '''
+                ''''''''''''''''''''''''''''''''''''''
+                loss_test = self.evaluate(self.domains_test, sess, eval_nodes)
+                print("*** On Test Set:\tloss = %.6f" % (loss_test))
 
 
-            if not test_loss_history or loss_test < min(test_loss_history):
-                saver_for_domain_save.save(sess, os.path.join(OUTPUT_DIR, 'domain_abstraction.params'))
-                print('Save on the disk at %s' % datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+                if not test_loss_history or loss_test < min(test_loss_history):
+                    saver_for_domain_save.save(sess, os.path.join(OUTPUT_DIR, 'domain_abstraction.params'))
+                    print('Save on the disk at %s' % datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
 
-            test_loss_history.append(loss_test)
+                test_loss_history.append(loss_test)
 
 
 
