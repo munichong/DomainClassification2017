@@ -54,7 +54,7 @@ print("Loading the FastText Model")
 
 
 
-class PosttrainFastTextClassifier:
+class PosttrainCharLevelClassifier:
 
     def __init__(self):
         ''' load data '''
@@ -354,5 +354,5 @@ class PosttrainFastTextClassifier:
 
 
 if __name__ == '__main__':
-    classifier = PosttrainFastTextClassifier()
+    classifier = PosttrainCharLevelClassifier()
     classifier.run_graph()
