@@ -43,8 +43,10 @@ n_fc_layers_domain_indep= 3
 width_fc_layers_domain_indep = 300
 n_fc_layers_calib = calib.n_fc_layers_domain
 width_fc_layers_calib = calib.width_fc_layers_domain
+width_final_rep = calib.width_final_rep
 n_fc_layers = 1
 width_fc_layers = 300
+
 act_fn = tf.nn.relu
 
 truncated_desc_words_len = calib.truncated_desc_words_len
@@ -75,40 +77,36 @@ class CharLevelClassifier_w_calib_domain:
 
     def __init__(self):
         ''' load data '''
-        origin_train_domains = pickle.load(open(OUTPUT_DIR + 'training_domains_%s.list' % DATASET, 'rb'))
-        self.domains_train = []
-        self.domains_val = []
-        self.domains_test = []
-        for domains in origin_train_domains:
-            shuffle(domains)
-            train_end_index = int(len(domains) * 0.8)
-            self.domains_train.append(domains[ : train_end_index])
-            validation_end_index = int(len(domains) * (0.8 + (1 - 0.8) / 2))
-            self.domains_val.append(domains[train_end_index : validation_end_index] )
-            self.domains_test.append(domains[validation_end_index: ])
+        # origin_train_domains = pickle.load(open(OUTPUT_DIR + 'training_domains_%s.list' % DATASET, 'rb'))
+        # self.domains_train = []
+        # self.domains_val = []
+        # self.domains_test = []
+        # for domains in origin_train_domains:
+        #     shuffle(domains)
+        #     train_end_index = int(len(domains) * 0.8)
+        #     self.domains_train.append(domains[ : train_end_index])
+        #     validation_end_index = int(len(domains) * (0.8 + (1 - 0.8) / 2))
+        #     self.domains_val.append(domains[train_end_index : validation_end_index] )
+        #     self.domains_test.append(domains[validation_end_index: ])
+        #
+        # # self.domains_train = pickle.load(open(OUTPUT_DIR + 'training_domains_%s.list' % DATASET, 'rb'))
+        # self.domains_train = [d for cat_domains in self.domains_train for d in cat_domains]
+        # # self.domains_val = pickle.load(open(OUTPUT_DIR + 'validation_domains_%s.list' % DATASET, 'rb'))
+        # self.domains_val = [d for cat_domains in self.domains_val for d in cat_domains]
+        # # self.domains_test = pickle.load(open(OUTPUT_DIR + 'test_domains_%s.list' % DATASET, 'rb'))
+        # self.domains_test = [d for cat_domains in self.domains_test for d in cat_domains]
+        # print(len(self.domains_train), len(self.domains_val), len(self.domains_test))
 
-        # self.domains_train = pickle.load(open(OUTPUT_DIR + 'training_domains_%s.list' % DATASET, 'rb'))
+        self.domains_train = pickle.load(open(OUTPUT_DIR + 'training_domains_%s.list' % DATASET, 'rb'))
         self.domains_train = [d for cat_domains in self.domains_train for d in cat_domains]
-        # self.domains_val = pickle.load(open(OUTPUT_DIR + 'validation_domains_%s.list' % DATASET, 'rb'))
+        self.domains_val = pickle.load(open(OUTPUT_DIR + 'validation_domains_%s.list' % DATASET, 'rb'))
         self.domains_val = [d for cat_domains in self.domains_val for d in cat_domains]
-        # self.domains_test = pickle.load(open(OUTPUT_DIR + 'test_domains_%s.list' % DATASET, 'rb'))
+        self.domains_test = pickle.load(open(OUTPUT_DIR + 'test_domains_%s.list' % DATASET, 'rb'))
         self.domains_test = [d for cat_domains in self.domains_test for d in cat_domains]
-        print(len(self.domains_train), len(self.domains_val), len(self.domains_test))
-
 
         ''' convert char n-gram and words to indice, respectively '''
-        self.charngram2index = defaultdict(int)  # index starts from 1. 0 is for padding
-        self.word2index = defaultdict(int)  # index starts from 1. 0 is for padding
-        for domains in (self.domains_train, self.domains_val, self.domains_test):
-            for domain in domains:
-                for word in domain['segmented_domain']:
-                    for i in range(max(1, len(word) - char_ngram)):  # some segments' lengths are less than char_ngram
-                        self.charngram2index[word[i : i + char_ngram]] = len(self.charngram2index) + 1
-                for word in domain['tokenized_desc']:
-                    self.word2index[word.lower()] = len(self.word2index) + 1
-        pickle.dump(self.charngram2index, open(os.path.join(OUTPUT_DIR, 'charngram2index.dict'), 'wb'))
-        pickle.dump(self.word2index, open(os.path.join(OUTPUT_DIR, 'word2index.dict'), 'wb'))
-        print("charngram2index and word2index have been updated !!!")
+        self.charngram2index = pickle.load(open(os.path.join(OUTPUT_DIR, 'charngram2index.dict'), 'rb'))
+        self.word2index = pickle.load(open(os.path.join(OUTPUT_DIR, 'word2index.dict'), 'rb'))
 
         ''' load params '''
         self.params = json.load(open(OUTPUT_DIR + 'params_%s.json' % DATASET))
@@ -282,7 +280,7 @@ class CharLevelClassifier_w_calib_domain:
 
                 domain_vec_cnn = self.get_cnn_output(char_embed_dimen_indep, domain_embed_indep,
                                                      self.params['max_domain_segments_len'], domain_num_filters_indep,
-                                                     domain_filter_sizes_indep, dropout_rate_indep, is_training)
+                                                     domain_filter_sizes_indep, is_training, dropout_rate_indep)
 
                 # pooled_outputs = []
                 # for filter_size in domain_filter_sizes_indep:
@@ -334,7 +332,7 @@ class CharLevelClassifier_w_calib_domain:
 
                 domain_vec_cnn = self.get_cnn_output(char_embed_dimen_calib, domain_embed_calib,
                                                      self.params['max_domain_segments_len'], domain_num_filters_calib,
-                                                     domain_filter_sizes_calib, dropout_rate_calib, is_training)
+                                                     domain_filter_sizes_calib, is_training, dropout_rate_calib, trainable=False)
 
                 # pooled_outputs = []
                 # for i, filter_size in enumerate(domain_filter_sizes_calib):
@@ -360,10 +358,14 @@ class CharLevelClassifier_w_calib_domain:
                 # domain_vec_cnn = tf.reshape(h_pool, [-1, domain_num_filters_total])
                 # domain_vec_cnn = tf.layers.dropout(domain_vec_cnn, dropout_rate_calib, training=is_training)
 
-                for _ in range(n_fc_layers_calib):
+                for _ in range(n_fc_layers_calib - 1):
                     logits_domain = tf.contrib.layers.fully_connected(domain_vec_cnn, num_outputs=width_fc_layers_calib,
                                                                     activation_fn=act_fn, trainable=False)
                     logits_domain = tf.layers.dropout(logits_domain, dropout_rate_calib, training=is_training)
+
+                logits_domain = tf.contrib.layers.fully_connected(logits_domain, num_outputs=width_final_rep,
+                                                                  activation_fn=act_fn, trainable=False)
+                logits_domain = tf.layers.dropout(logits_domain, dropout_rate, training=is_training)
 
                 output_vectors.append(logits_domain)
 
