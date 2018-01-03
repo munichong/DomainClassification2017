@@ -221,7 +221,7 @@ class CharLevelClassifier_w_desc:
             total_bool.extend(batch_bool)
             total_pred.extend(batch_pred)
             n_batch += 1
-        return total_loss / n_batch, total_correct / n_batch, total_bool, total_pred
+        return total_loss / n_batch, total_correct / len(data), total_bool, total_pred
 
     def get_cnn_output(self, embed_dimen, embed, max_seq_len, num_filters, filter_sizes, is_training, trainable=True):
         pooled_outputs = []
@@ -309,31 +309,9 @@ class CharLevelClassifier_w_desc:
             ''' CNN for domain '''
             with tf.variable_scope('cnn_domain'):
 
-                domain_vec_cnn = self.get_cnn_output(char_embed_dimen, domain_embed,
+                domain_vec_cnn = self.get_cnn_output(char_embed_dimen, x_embed_domain,
                                                      self.params['max_domain_segments_len'], domain_num_filters,
                                                      domain_filter_sizes, is_training)
-
-                # pooled_outputs = []
-                # for filter_size in domain_filter_sizes:
-                #     # Define and initialize filters
-                #     filter_shape = [filter_size, char_embed_dimen, 1, domain_num_filters]
-                #     W_filter = tf.Variable(tf.truncated_normal(filter_shape, stddev=0.1)) # initialize the filters' weights
-                #     b_filter = tf.Variable(tf.constant(0.1, shape=[domain_num_filters]))  # initialize the filters' biases
-                #     # The conv2d operation expects a 4-D tensor with dimensions corresponding to batch, width, height and channel.
-                #     # The result of our embedding doesnâ€™t contain the channel dimension
-                #     # So we add it manually, leaving us with a layer of shape [None, sequence_length, embedding_size, 1].
-                #     x_embed_expanded = tf.expand_dims(x_embed_domain, -1)
-                #     conv = tf.nn.conv2d(x_embed_expanded, W_filter, strides=[1, 1, 1, 1], padding="VALID")
-                #     # Apply nonlinearity
-                #     h = tf.nn.relu(tf.nn.bias_add(conv, b_filter), name="relu")
-                #     pooled = tf.nn.max_pool(h, ksize=[1, self.params['max_domain_segments_len'] - filter_size + 1, 1, 1],
-                #                         strides=[1, 1, 1, 1], padding='VALID')
-                #     pooled_outputs.append(pooled)
-                # # Combine all the pooled features
-                # h_pool = tf.concat(pooled_outputs, axis=3)
-                # domain_num_filters_total = domain_num_filters * len(domain_filter_sizes)
-                # domain_vec_cnn = tf.reshape(h_pool, [-1, domain_num_filters_total])
-                # domain_vec_cnn = tf.layers.dropout(domain_vec_cnn, dropout_rate, training=is_training)
 
                 for _ in range(n_fc_layers_domain):
                     logits_domain_cnn = tf.contrib.layers.fully_connected(domain_vec_cnn, num_outputs=width_fc_layers_domain, activation_fn=act_fn)
@@ -358,42 +336,14 @@ class CharLevelClassifier_w_desc:
             ''' CNN for desc '''
             with tf.variable_scope('cnn_desc'):
 
-                desc_vec_cnn = self.get_cnn_output(word_embed_dimen, desc_embed,
+                desc_vec_cnn = self.get_cnn_output(word_embed_dimen, x_embed_desc,
                                                      self.params['max_desc_words_len'], desc_num_filters,
                                                      desc_filter_sizes, is_training)
-
-                # pooled_outputs = []
-                # # W_filter_dict = {'W_filter%d_desc' % i : tf.Variable(tf.truncated_normal(filter_shape, stddev=0.1)) for i in range(len(desc_filter_sizes))}
-                # # b_filter_dict = {'b_filter%d_desc' % i : tf.Variable(tf.constant(0.1, shape=[desc_num_filters])) for i in range(len(desc_filter_sizes))}
-                # for i, filter_size in enumerate(desc_filter_sizes):
-                #     # Define and initialize filters
-                #     filter_shape = [filter_size, word_embed_dimen, 1, desc_num_filters]
-                #
-                #     W_filter = tf.Variable(tf.truncated_normal(filter_shape, stddev=0.1)) # initialize the filters' weights
-                #     b_filter = tf.Variable(tf.constant(0.1, shape=[desc_num_filters]))  # initialize the filters' biases
-                #     # W_filter = W_filter_dict['W_filter%d_desc' % i]
-                #     # b_filter = b_filter_dict['b_filter%d_desc' % i]
-                #
-                #     # The conv2d operation expects a 4-D tensor with dimensions corresponding to batch, width, height and channel.
-                #     # The result of our embedding doesnâ€™t contain the channel dimension
-                #     # So we add it manually, leaving us with a layer of shape [None, sequence_length, embedding_size, 1].
-                #     x_embed_expanded = tf.expand_dims(x_embed_desc, -1)
-                #     conv = tf.nn.conv2d(x_embed_expanded, W_filter, strides=[1, 1, 1, 1], padding="VALID")
-                #     # Apply nonlinearity
-                #     h = tf.nn.relu(tf.nn.bias_add(conv, b_filter), name="relu")
-                #     pooled = tf.nn.max_pool(h, ksize=[1, self.params['max_desc_words_len'] - filter_size + 1, 1, 1],
-                #                         strides=[1, 1, 1, 1], padding='VALID')
-                #     pooled_outputs.append(pooled)
-                # # Combine all the pooled features
-                # h_pool = tf.concat(pooled_outputs, axis=3)
-                # desc_num_filters_total = desc_num_filters * len(desc_filter_sizes)
-                # desc_vec_cnn = tf.reshape(h_pool, [-1, desc_num_filters_total])
-                # desc_vec_cnn = tf.layers.dropout(desc_vec_cnn, dropout_rate, training=is_training)
 
                 for _ in range(n_fc_layers_desc):
                     logits_desc = tf.contrib.layers.fully_connected(desc_vec_cnn, num_outputs=width_fc_layers_desc, activation_fn=act_fn)
                     logits_desc = tf.layers.dropout(logits_desc, dropout_rate, training=is_training)
-                output_vectors.append(logits_desc)
+            output_vectors.append(logits_desc)
 
 
 
@@ -436,7 +386,7 @@ class CharLevelClassifier_w_desc:
         '''
         variables = slim.get_variables_to_restore()
         variables_to_restore = {v.name : v for v in variables if v.name.split('/')[0] == 'cnn_desc'}
-        print("variables_to_restore:", ['desc_embeddings'] + sorted(variables_to_restore.keys()))
+        print("variables_to_save:", ['desc_embeddings'] + sorted(variables_to_restore.keys()))
         saver = tf.train.Saver({**{"desc_embeddings": desc_embeddings}, **variables_to_restore})
 
 

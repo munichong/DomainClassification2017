@@ -13,7 +13,7 @@ from collections import defaultdict
 from sklearn.metrics import precision_recall_fscore_support
 from datetime import datetime
 import warnings
-import char_level_deep_classifier_w_desc as first_clf
+import char_level_deep_classifier_w_desc as desc_classifier
 
 warnings.filterwarnings(action='ignore', category=UserWarning, module='gensim')
 from gensim.models.wrappers import FastText
@@ -22,44 +22,44 @@ DATASET = 'content'  # 'content' or '2340768'
 
 char_ngram = 4
 
-domain_network_type = first_clf.domain_network_type
-desc_network_type = first_clf.desc_network_type
+domain_network_type = desc_classifier.domain_network_type
+desc_network_type = desc_classifier.desc_network_type
 # For RNN
 n_rnn_neurons = 300
 # For CNN
 domain_filter_sizes = [2,1]
-desc_filter_sizes = first_clf.desc_filter_sizes
-domain_num_filters = 512
-desc_num_filters = first_clf.desc_num_filters
+desc_filter_sizes = desc_classifier.desc_filter_sizes
+domain_num_filters = 800
+desc_num_filters = desc_classifier.desc_num_filters
 
-char_embed_dimen = 50
-word_embed_dimen = first_clf.word_embed_dimen
+char_embed_dimen = 200
+word_embed_dimen = desc_classifier.word_embed_dimen
 
 dropout_rate= 0.0  # dropout leads to worse performance
-n_fc_layers_domain = 3
-width_fc_layers_domain = 1200
-width_final_rep = first_clf.width_fc_layers_desc
-n_fc_layers_desc= first_clf.n_fc_layers_desc
-width_fc_layers_desc = first_clf.width_fc_layers_desc
+n_fc_layers_domain = 4
+width_fc_layers_domain = 800
+n_fc_layers_desc= desc_classifier.n_fc_layers_desc
+width_fc_layers_desc = desc_classifier.width_fc_layers_desc
+width_final_rep = desc_classifier.width_fc_layers_desc
 
 act_fn = tf.nn.relu
 
-truncated_desc_words_len = first_clf.truncated_desc_words_len
+truncated_desc_words_len = desc_classifier.truncated_desc_words_len
 
 
 calibration_reg_factor = 0.00  # regularization leads to worse performance
 
-n_epochs = 20
-batch_size = 64
+n_epochs = 10
+batch_size = 32
 autoencoder_lr_rate = 0.001
 
 class_weighted = False
 
 
-OUTPUT_DIR = first_clf.OUTPUT_DIR
+OUTPUT_DIR = desc_classifier.OUTPUT_DIR
 
-category2index = first_clf.category2index
-categories = first_clf.categories
+category2index = desc_classifier.category2index
+categories = desc_classifier.categories
 
 # Creating the model
 # print("Loading the FastText Model")
@@ -253,6 +253,7 @@ class domain_desc_calibrator:
                            name='target')  # Each entry in y must be an index in [0, num_classes)
 
 
+
         ''' Abstractize Descriptions (Should be all non-trainable) '''
         # embedding layers
         desc_embeddings = tf.Variable(tf.random_uniform([len(self.word2index), word_embed_dimen], -1.0, 1.0),
@@ -269,12 +270,12 @@ class domain_desc_calibrator:
         #     desc_vectors.append(domain_vec_rnn)
         if 'CNN' in desc_network_type:
             with tf.variable_scope('cnn_desc'):
+
                 desc_vec_cnn = self.get_cnn_output(word_embed_dimen, x_embed_desc,
-                                            self.params['max_desc_words_len'], desc_num_filters, desc_filter_sizes, is_training,
-                                                   trainable=False)
+                                            self.params['max_desc_words_len'], desc_num_filters, desc_filter_sizes,
+                                                   is_training, trainable=False)
 
                 for _ in range(n_fc_layers_desc):
-                # for _ in range(n_fc_layers_desc - 1):
                     logits_desc = tf.contrib.layers.fully_connected(desc_vec_cnn, num_outputs=width_fc_layers_desc,
                                                                 activation_fn=act_fn, trainable=False)
                     logits_desc = tf.layers.dropout(logits_desc, dropout_rate, training=is_training)
@@ -287,6 +288,7 @@ class domain_desc_calibrator:
 
 
         cat_layer_desc = tf.concat(desc_vectors, -1)
+
 
 
 
@@ -317,13 +319,13 @@ class domain_desc_calibrator:
                     logits_domain = tf.layers.dropout(logits_domain, dropout_rate, training=is_training)
 
                 logits_domain = tf.contrib.layers.fully_connected(logits_domain, num_outputs=width_final_rep,
-                                                                  activation_fn = act_fn)
+                                                                  activation_fn=act_fn)
                 logits_domain = tf.layers.dropout(logits_domain, dropout_rate, training=is_training)
 
             domain_vectors.append(logits_domain)
 
-
         cat_layer_domain = tf.concat(domain_vectors, -1)
+
 
 
         reconstruction_loss = tf.losses.mean_squared_error(cat_layer_desc, cat_layer_domain, weights=1.0)
@@ -348,10 +350,7 @@ class domain_desc_calibrator:
         saver_for_domain_save = tf.train.Saver({**{'domain_embeddings_calib' : domain_embeddings_calib}, **variables_to_save})
 
         ''' Make sure all variables about desc CNN are non-trainable '''
-        # print([v for v in tf.trainable_variables() if v.name.split('/')[0] == 'cnn_desc'])
         assert [] == [v for v in tf.trainable_variables() if v.name.split('/')[0] == 'cnn_desc']
-
-
 
         with tf.Session() as sess:
             init.run()

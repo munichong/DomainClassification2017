@@ -282,33 +282,11 @@ class CharLevelClassifier_w_calib_domain:
                                                      self.params['max_domain_segments_len'], domain_num_filters_indep,
                                                      domain_filter_sizes_indep, is_training, dropout_rate_indep)
 
-                # pooled_outputs = []
-                # for filter_size in domain_filter_sizes_indep:
-                #     # Define and initialize filters
-                #     filter_shape = [filter_size, char_embed_dimen_indep, 1, domain_num_filters_indep]
-                #     W_filter = tf.Variable(tf.truncated_normal(filter_shape, stddev=0.1)) # initialize the filters' weights
-                #     b_filter = tf.Variable(tf.constant(0.1, shape=[domain_num_filters_indep]))  # initialize the filters' biases
-                #     # The conv2d operation expects a 4-D tensor with dimensions corresponding to batch, width, height and channel.
-                #     # The result of our embedding doesnâ€™t contain the channel dimension
-                #     # So we add it manually, leaving us with a layer of shape [None, sequence_length, embedding_size, 1].
-                #     domain_embed_expanded_indep = tf.expand_dims(domain_embed_indep, -1)
-                #     conv = tf.nn.conv2d(domain_embed_expanded_indep, W_filter, strides=[1, 1, 1, 1], padding="VALID")
-                #     # Apply nonlinearity
-                #     h = tf.nn.relu(tf.nn.bias_add(conv, b_filter), name="relu")
-                #     pooled = tf.nn.max_pool(h, ksize=[1, self.params['max_domain_segments_len'] - filter_size + 1, 1, 1],
-                #                         strides=[1, 1, 1, 1], padding='VALID')
-                #     pooled_outputs.append(pooled)
-                # # Combine all the pooled features
-                # h_pool = tf.concat(pooled_outputs, axis=3)
-                # domain_num_filters_total = domain_num_filters_indep * len(domain_filter_sizes_indep)
-                # domain_vec_cnn = tf.reshape(h_pool, [-1, domain_num_filters_total])
-                # domain_vec_cnn = tf.layers.dropout(domain_vec_cnn, dropout_rate_indep, training=is_training)
-
                 for _ in range(n_fc_layers_domain_indep):
                     logits_domain_cnn = tf.contrib.layers.fully_connected(domain_vec_cnn, num_outputs=width_fc_layers_domain_indep,
                                                                           activation_fn=act_fn)
                     logits_domain_cnn = tf.layers.dropout(logits_domain_cnn, dropout_rate_indep, training=is_training)
-                output_vectors.append(logits_domain_cnn)
+            output_vectors.append(logits_domain_cnn)
 
 
 
@@ -334,30 +312,6 @@ class CharLevelClassifier_w_calib_domain:
                                                      self.params['max_domain_segments_len'], domain_num_filters_calib,
                                                      domain_filter_sizes_calib, is_training, dropout_rate_calib, trainable=False)
 
-                # pooled_outputs = []
-                # for i, filter_size in enumerate(domain_filter_sizes_calib):
-                #     # Define and initialize filters
-                #     filter_shape = [filter_size, char_embed_dimen_calib, 1, domain_num_filters_calib]
-                #
-                #     W_filter = tf.Variable(tf.truncated_normal(filter_shape, stddev=0.1), trainable=False) # initialize the filters' weights
-                #     b_filter = tf.Variable(tf.constant(0.1, shape=[domain_num_filters_calib]), trainable=False)  # initialize the filters' biases
-                #
-                #     # The conv2d operation expects a 4-D tensor with dimensions corresponding to batch, width, height and channel.
-                #     # The result of our embedding doesnâ€™t contain the channel dimension
-                #     # So we add it manually, leaving us with a layer of shape [None, sequence_length, embedding_size, 1].
-                #     domain_embed_expanded_calib = tf.expand_dims(domain_embed_calib, -1)
-                #     conv = tf.nn.conv2d(domain_embed_expanded_calib, W_filter, strides=[1, 1, 1, 1], padding="VALID")
-                #     # Apply nonlinearity
-                #     h = tf.nn.relu(tf.nn.bias_add(conv, b_filter), name="relu")
-                #     pooled = tf.nn.max_pool(h, ksize=[1, self.params['max_desc_words_len'] - filter_size + 1, 1, 1],
-                #                         strides=[1, 1, 1, 1], padding='VALID')
-                #     pooled_outputs.append(pooled)
-                # # Combine all the pooled features
-                # h_pool = tf.concat(pooled_outputs, axis=3)
-                # domain_num_filters_total = domain_num_filters_calib * len(domain_filter_sizes_calib)
-                # domain_vec_cnn = tf.reshape(h_pool, [-1, domain_num_filters_total])
-                # domain_vec_cnn = tf.layers.dropout(domain_vec_cnn, dropout_rate_calib, training=is_training)
-
                 for _ in range(n_fc_layers_calib - 1):
                     logits_domain = tf.contrib.layers.fully_connected(domain_vec_cnn, num_outputs=width_fc_layers_calib,
                                                                     activation_fn=act_fn, trainable=False)
@@ -367,12 +321,8 @@ class CharLevelClassifier_w_calib_domain:
                                                                   activation_fn=act_fn, trainable=False)
                 logits_domain = tf.layers.dropout(logits_domain, dropout_rate, training=is_training)
 
-                output_vectors.append(logits_domain)
+            output_vectors.append(logits_domain)
 
-
-
-        # concatenate suffix one-hot and the abstract representation of the domains segments
-        # The shape of cat_layer should be [batch_size, n_lstm_neurons+self.params['num_suffix']]
         cat_layer = tf.concat(output_vectors + [x_suffix], -1)
 
 
