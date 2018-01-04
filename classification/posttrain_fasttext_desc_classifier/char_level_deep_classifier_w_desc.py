@@ -28,7 +28,7 @@ n_rnn_neurons = 300
 domain_filter_sizes = [2,1]
 desc_filter_sizes = [2,3]
 domain_num_filters = 256
-desc_num_filters = 256
+desc_num_filters = 512
 
 char_embed_dimen = 50
 word_embed_dimen = 100
@@ -38,14 +38,14 @@ n_fc_layers_domain= 3
 width_fc_layers_domain = 300
 n_fc_layers_desc = 3
 width_fc_layers_desc = 300
-n_fc_layers = 1
+n_fc_layers = 2
 width_fc_layers = 300
 act_fn = tf.nn.relu
 
 truncated_desc_words_len = 100
 
-n_epochs = 50
-batch_size = 2000
+n_epochs = 30
+batch_size = 1000
 lr_rate = 0.001
 
 class_weighted = False
@@ -435,7 +435,7 @@ class CharLevelClassifier_w_desc:
                 ''''''''''''''''''''''''''''''''''''
                 eval_nodes = [n_correct, loss_mean, is_correct, prediction]
                 print()
-                print("========== Evaluation at Epoch %d ==========" % epoch)
+                print("\n========== Evaluation at Epoch %d ==========" % epoch)
                 loss_train, acc_train, _, _ = self.evaluate(self.domains_train, sess, eval_nodes)
                 print("*** On Training Set:\tloss = %.6f\taccuracy = %.4f" % (loss_train, acc_train))
 

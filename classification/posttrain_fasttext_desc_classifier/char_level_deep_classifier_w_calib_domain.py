@@ -20,7 +20,8 @@ from gensim.models.wrappers import FastText
 
 DATASET = 'content'  # 'content' or '2340768'
 
-char_ngram = 4
+
+char_ngram = calib.char_ngram
 
 domain_network_type_indep = 'CNN'
 domain_network_type_calib = 'CNN'
