@@ -27,10 +27,10 @@ n_rnn_neurons = 300
 # For CNN
 domain_filter_sizes = [2,1]
 desc_filter_sizes = [2,3]
-domain_num_filters = 256
+domain_num_filters = 512  # 256
 desc_num_filters = 512
 
-char_embed_dimen = 50
+char_embed_dimen = 300  # 50
 word_embed_dimen = 100
 # n_fc_neurons = 64
 dropout_rate= 0.2
@@ -38,13 +38,13 @@ n_fc_layers_domain= 3
 width_fc_layers_domain = 300
 n_fc_layers_desc = 3
 width_fc_layers_desc = 300
-n_fc_layers = 2
+n_fc_layers = 1  # 2
 width_fc_layers = 300
 act_fn = tf.nn.relu
 
 max_required_desc_words_len = 100
 
-n_epochs = 30
+n_epochs = 60
 batch_size = 1000
 lr_rate = 0.001
 
@@ -345,7 +345,7 @@ class CharLevelClassifier_w_desc:
                 for _ in range(n_fc_layers_desc):
                     logits_desc = tf.contrib.layers.fully_connected(desc_vec_cnn, num_outputs=width_fc_layers_desc, activation_fn=act_fn)
                     logits_desc = tf.layers.dropout(logits_desc, dropout_rate, training=is_training)
-            output_vectors.append(logits_desc)
+            # output_vectors.append(logits_desc)
 
 
 
