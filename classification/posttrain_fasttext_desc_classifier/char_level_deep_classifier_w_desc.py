@@ -42,7 +42,7 @@ n_fc_layers = 2
 width_fc_layers = 300
 act_fn = tf.nn.relu
 
-truncated_desc_words_len = 100
+max_required_desc_words_len = 100
 
 n_epochs = 30
 batch_size = 1000
@@ -97,17 +97,19 @@ class CharLevelClassifier_w_desc:
         for domains in (self.domains_train, self.domains_val, self.domains_test):
             for domain in domains:
                 for word in domain['segmented_domain']:
-                    for i in range(max(1, len(word) - char_ngram)):  # some segments' lengths are less than char_ngram
+                    word = ''.join(['<', word, '>'])
+                    for i in range(max(1, len(word) - char_ngram) + 1):  # some segments' lengths are less than char_ngram
                         self.charngram2index[word[i : i + char_ngram]] = len(self.charngram2index) + 1
                 for word in domain['tokenized_desc']:
                     self.word2index[word.lower()] = len(self.word2index) + 1
-        pickle.dump(self.charngram2index, open(os.path.join(OUTPUT_DIR, 'charngram2index.dict'), 'wb'))
+        # pickle.dump(self.charngram2index, open(os.path.join(OUTPUT_DIR, 'charngram2index.dict'), 'wb'))
         pickle.dump(self.word2index, open(os.path.join(OUTPUT_DIR, 'word2index.dict'), 'wb'))
-        print("charngram2index and word2index have been updated !!!")
+        print("word2index have been updated !!!")
 
         ''' load params '''
         self.params = json.load(open(OUTPUT_DIR + 'params_%s.json' % DATASET))
-        self.params['max_desc_words_len'] = min(truncated_desc_words_len, self.params['max_desc_words_len'])
+        self.truncated_desc_words_len = min(max_required_desc_words_len, self.params['max_desc_words_len'])
+        self.params['max_segment_char_len'] += 2  # because '<' and '>' are appended to each word
         self.compute_class_weights()
 
     def compute_class_weights(self):
@@ -138,7 +140,8 @@ class CharLevelClassifier_w_desc:
                 embeds = []  # [[1,2,5,0,0], [35,3,7,8,4], ...]
                 # print(domains[i])
                 for word in domains[i]['segmented_domain']:
-                    embeds.append([self.charngram2index[word[start : start + char_ngram]] for start in range(max(1, len(word) - char_ngram))])
+                    word = ''.join(['<', word, '>'])
+                    embeds.append([self.charngram2index[word[start : start + char_ngram]] for start in range(max(1, len(word) - char_ngram + 1))])
                 domain_actual_lens.append(len(embeds))
                 ''' domain char n-gram padding '''
                 # pad char-ngram level
@@ -156,14 +159,13 @@ class CharLevelClassifier_w_desc:
 
 
                 ''' description '''
-                desc_indice = [self.word2index[word.lower()] for word in domains[i]['tokenized_desc'][ : self.params['max_desc_words_len']]]  # truncate
+                desc_indice = [self.word2index[word.lower()] for word in domains[i]['tokenized_desc'][ : self.truncated_desc_words_len]]  # truncate
                 ''' description padding '''
-                if self.params['max_desc_words_len'] >= len(desc_indice):
-                    desc_indice += [0] * (self.params['max_desc_words_len'] - len(desc_indice))
-                else:
-                    desc_indice += [0] * (self.params['max_desc_words_len'] - len(desc_indice))
+                if len(desc_indice) < self.truncated_desc_words_len:
+                    desc_indice += [0] * (self.truncated_desc_words_len - len(desc_indice))
+
                 X_batch_desc.append(desc_indice)
-                # assert len(desc_indice) == self.params['max_desc_words_len']
+                assert len(desc_indice) == self.truncated_desc_words_len
 
                 ''' description mask '''
                 X_batch_desc_mask.append((np.array(desc_indice) != 0).astype(float))
@@ -228,8 +230,8 @@ class CharLevelClassifier_w_desc:
         for filter_size in filter_sizes:
             # Define and initialize filters
             filter_shape = [filter_size, embed_dimen, 1, num_filters]
-            W_filter = tf.Variable(tf.truncated_normal(filter_shape, stddev=0.1), trainable=trainable) # initialize the filters' weights
-            b_filter = tf.Variable(tf.constant(0.1, shape=[num_filters]), trainable=trainable)  # initialize the filters' biases
+            W_filter = tf.Variable(tf.truncated_normal(filter_shape, stddev=0.1), trainable=trainable, name='W_filtersize_%d' % filter_size) # initialize the filters' weights
+            b_filter = tf.Variable(tf.constant(0.1, shape=[num_filters]), trainable=trainable, name='b_filtersize_%d' % filter_size)  # initialize the filters' biases
             # The conv2d operation expects a 4-D tensor with dimensions corresponding to batch, width, height and channel.
             # The result of our embedding doesnâ€™t contain the channel dimension
             # So we add it manually, leaving us with a layer of shape [None, sequence_length, embedding_size, 1].
@@ -270,9 +272,9 @@ class CharLevelClassifier_w_desc:
 
 
         x_desc_indice = tf.placeholder(tf.int32,
-                                 shape=[None, self.params['max_desc_words_len']],
+                                 shape=[None, self.truncated_desc_words_len],
                                  name='desc_embed')
-        desc_mask = tf.placeholder(tf.float32, shape=[None, self.params['max_desc_words_len']],
+        desc_mask = tf.placeholder(tf.float32, shape=[None, self.truncated_desc_words_len],
                               name='desc_mask')
 
 
@@ -337,7 +339,7 @@ class CharLevelClassifier_w_desc:
             with tf.variable_scope('cnn_desc'):
 
                 desc_vec_cnn = self.get_cnn_output(word_embed_dimen, x_embed_desc,
-                                                     self.params['max_desc_words_len'], desc_num_filters,
+                                                     self.truncated_desc_words_len, desc_num_filters,
                                                      desc_filter_sizes, is_training)
 
                 for _ in range(n_fc_layers_desc):
@@ -373,6 +375,10 @@ class CharLevelClassifier_w_desc:
         accuracy = tf.reduce_mean(tf.cast(is_correct, tf.float32))
 
         init = tf.global_variables_initializer()
+
+        print('Trainable Variables:', tf.trainable_variables())
+        print('Non-Trainable Variables:', [v.name for v in set(tf.global_variables()) - set(tf.trainable_variables())
+                                           if v.name.split('/')[-1][:4] != 'Adam' and v.name.split('/')[-1][:4] != 'beta' ])
 
         ''' Save the parameters of the CNN_desc part '''
         '''

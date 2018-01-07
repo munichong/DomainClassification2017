@@ -21,7 +21,7 @@ from gensim.models.wrappers import FastText
 DATASET = 'content'  # 'content' or '2340768'
 
 
-char_ngram = calib.char_ngram
+char_ngram = calib.char_ngram_calib  # So far char_ngram_indep == char_ngram_calib
 
 domain_network_type_indep = 'CNN'
 domain_network_type_calib = 'CNN'
@@ -29,30 +29,30 @@ domain_network_type_calib = 'CNN'
 n_rnn_neurons = 300
 # For CNN
 domain_filter_sizes_indep = [2,1]
-domain_num_filters_indep = 256
+domain_num_filters_indep = 512
 
 domain_filter_sizes_calib = calib.domain_filter_sizes
 domain_num_filters_calib = calib.domain_num_filters
 
-char_embed_dimen_indep = 50
+char_embed_dimen_indep = 300
 char_embed_dimen_calib = calib.char_embed_dimen
 
 dropout_rate = 0.2
 dropout_rate_indep= 0.2
 dropout_rate_calib = calib.dropout_rate
-n_fc_layers_domain_indep= 3
+n_fc_layers_domain_indep= 0
 width_fc_layers_domain_indep = 300
 n_fc_layers_calib = calib.n_fc_layers_domain
 width_fc_layers_calib = calib.width_fc_layers_domain
 width_final_rep = calib.width_final_rep
-n_fc_layers = 1
+n_fc_layers = 3
 width_fc_layers = 300
 
 act_fn = tf.nn.relu
 
-truncated_desc_words_len = calib.truncated_desc_words_len
+max_required_desc_words_len = calib.max_required_desc_words_len
 
-n_epochs = 50
+n_epochs = 100
 batch_size = 2000
 lr_rate = 0.001
 
@@ -69,7 +69,6 @@ print(categories)
 
 # Creating the model
 # print("Loading the FastText Model")
-# en_model = {"test":np.array([0]*300)}
 # en_model = FastText.load_fasttext_format('../FastText/wiki.en/wiki.en')
 
 
@@ -78,26 +77,6 @@ class CharLevelClassifier_w_calib_domain:
 
     def __init__(self):
         ''' load data '''
-        # origin_train_domains = pickle.load(open(OUTPUT_DIR + 'training_domains_%s.list' % DATASET, 'rb'))
-        # self.domains_train = []
-        # self.domains_val = []
-        # self.domains_test = []
-        # for domains in origin_train_domains:
-        #     shuffle(domains)
-        #     train_end_index = int(len(domains) * 0.8)
-        #     self.domains_train.append(domains[ : train_end_index])
-        #     validation_end_index = int(len(domains) * (0.8 + (1 - 0.8) / 2))
-        #     self.domains_val.append(domains[train_end_index : validation_end_index] )
-        #     self.domains_test.append(domains[validation_end_index: ])
-        #
-        # # self.domains_train = pickle.load(open(OUTPUT_DIR + 'training_domains_%s.list' % DATASET, 'rb'))
-        # self.domains_train = [d for cat_domains in self.domains_train for d in cat_domains]
-        # # self.domains_val = pickle.load(open(OUTPUT_DIR + 'validation_domains_%s.list' % DATASET, 'rb'))
-        # self.domains_val = [d for cat_domains in self.domains_val for d in cat_domains]
-        # # self.domains_test = pickle.load(open(OUTPUT_DIR + 'test_domains_%s.list' % DATASET, 'rb'))
-        # self.domains_test = [d for cat_domains in self.domains_test for d in cat_domains]
-        # print(len(self.domains_train), len(self.domains_val), len(self.domains_test))
-
         self.domains_train = pickle.load(open(OUTPUT_DIR + 'training_domains_%s.list' % DATASET, 'rb'))
         self.domains_train = [d for cat_domains in self.domains_train for d in cat_domains]
         self.domains_val = pickle.load(open(OUTPUT_DIR + 'validation_domains_%s.list' % DATASET, 'rb'))
@@ -106,12 +85,13 @@ class CharLevelClassifier_w_calib_domain:
         self.domains_test = [d for cat_domains in self.domains_test for d in cat_domains]
 
         ''' convert char n-gram and words to indice, respectively '''
-        self.charngram2index = pickle.load(open(os.path.join(OUTPUT_DIR, 'charngram2index.dict'), 'rb'))
+        self.charngram2index = pickle.load(open(os.path.join(OUTPUT_DIR, 'charngram2index_calib.dict'), 'rb'))
         self.word2index = pickle.load(open(os.path.join(OUTPUT_DIR, 'word2index.dict'), 'rb'))
 
         ''' load params '''
         self.params = json.load(open(OUTPUT_DIR + 'params_%s.json' % DATASET))
-        self.params['max_desc_words_len'] = min(truncated_desc_words_len, self.params['max_desc_words_len'])
+        # self.params['max_desc_words_len'] = min(truncated_desc_words_len, self.params['max_desc_words_len'])
+        self.params['max_segment_char_len'] += 2  # because '<' and '>' are appended to each word
         self.compute_class_weights()
 
     def compute_class_weights(self):
@@ -140,7 +120,8 @@ class CharLevelClassifier_w_calib_domain:
                 embeds = []  # [[1,2,5,0,0], [35,3,7,8,4], ...]
                 # print(domains[i])
                 for word in domains[i]['segmented_domain']:
-                    embeds.append([self.charngram2index[word[start : start + char_ngram]] for start in range(max(1, len(word) - char_ngram))])
+                    word = ''.join(['<', word, '>'])
+                    embeds.append([self.charngram2index[word[start : start + char_ngram]] for start in range(max(1, len(word) - char_ngram + 1))])
                 domain_actual_lens.append(len(embeds))
                 ''' domain char n-gram padding '''
                 # pad char-ngram level
@@ -196,7 +177,7 @@ class CharLevelClassifier_w_calib_domain:
             total_bool.extend(batch_bool)
             total_pred.extend(batch_pred)
             n_batch += 1
-        return total_loss / n_batch, total_correct / n_batch, total_bool, total_pred
+        return total_loss / n_batch, total_correct / len(data), total_bool, total_pred
 
 
     def get_cnn_output(self, embed_dimen, embed, max_seq_len, num_filters, filter_sizes, is_training, cnn_dropout, trainable=True):
@@ -204,8 +185,8 @@ class CharLevelClassifier_w_calib_domain:
         for filter_size in filter_sizes:
             # Define and initialize filters
             filter_shape = [filter_size, embed_dimen, 1, num_filters]
-            W_filter = tf.Variable(tf.truncated_normal(filter_shape, stddev=0.1), trainable=trainable) # initialize the filters' weights
-            b_filter = tf.Variable(tf.constant(0.1, shape=[num_filters]), trainable=trainable)  # initialize the filters' biases
+            W_filter = tf.Variable(tf.truncated_normal(filter_shape, stddev=0.1), trainable=trainable, name='W_filtersize_%d' % filter_size) # initialize the filters' weights
+            b_filter = tf.Variable(tf.constant(0.1, shape=[num_filters]), trainable=trainable, name='b_filtersize_%d' % filter_size)  # initialize the filters' biases
             # The conv2d operation expects a 4-D tensor with dimensions corresponding to batch, width, height and channel.
             # The result of our embedding doesnâ€™t contain the channel dimension
             # So we add it manually, leaving us with a layer of shape [None, sequence_length, embedding_size, 1].
@@ -240,15 +221,15 @@ class CharLevelClassifier_w_calib_domain:
                                         self.params['max_segment_char_len'] - char_ngram + 1],
                                  name='domain_embed')
 
-
-
         seq_len = tf.placeholder(tf.int32, shape=[None], name='length')
 
         domain_mask = tf.placeholder(tf.float32, shape=[None, self.params['max_domain_segments_len'],
                                                  self.params['max_segment_char_len'] - char_ngram + 1],
                               name='domain_mask')
 
-
+        sample_weights = tf.placeholder(tf.float32, shape=[None], name='weight')
+        y = tf.placeholder(tf.int32, shape=[None],
+                           name='target')  # Each entry in y must be an index in [0, num_classes)
 
         output_vectors = []
 
@@ -284,10 +265,11 @@ class CharLevelClassifier_w_calib_domain:
                                                      domain_filter_sizes_indep, is_training, dropout_rate_indep)
 
                 for _ in range(n_fc_layers_domain_indep):
-                    logits_domain_cnn = tf.contrib.layers.fully_connected(domain_vec_cnn, num_outputs=width_fc_layers_domain_indep,
+                    domain_vec_cnn = tf.contrib.layers.fully_connected(domain_vec_cnn, num_outputs=width_fc_layers_domain_indep,
                                                                           activation_fn=act_fn)
-                    logits_domain_cnn = tf.layers.dropout(logits_domain_cnn, dropout_rate_indep, training=is_training)
-            output_vectors.append(logits_domain_cnn)
+                    domain_vec_cnn = tf.layers.dropout(domain_vec_cnn, dropout_rate_indep, training=is_training)
+
+            output_vectors.append(domain_vec_cnn)
 
 
 
@@ -295,34 +277,30 @@ class CharLevelClassifier_w_calib_domain:
         ''' calibrated domain part '''
         domain_embeddings_calib = tf.Variable(
             tf.random_uniform([len(self.charngram2index), char_embed_dimen_calib], -1.0, 1.0),
-            trainable=False)
+            trainable=True)
         domain_embed_calib = tf.nn.embedding_lookup(domain_embeddings_calib, x_char_ngram_indice)
         domain_mask_calib = tf.expand_dims(domain_mask, axis=-1)
         domain_mask_calib = tf.tile(domain_mask_calib, [1, 1, 1, char_embed_dimen_calib])
         domain_embed_calib = tf.multiply(domain_embed_calib, domain_mask_calib)
         domain_embed_calib = tf.reduce_mean(domain_embed_calib, 2)
 
-        sample_weights = tf.placeholder(tf.float32, shape=[None], name='weight')
-        y = tf.placeholder(tf.int32, shape=[None],
-                           name='target')  # Each entry in y must be an index in [0, num_classes)
-
         if 'CNN' in domain_network_type_calib:
             with tf.variable_scope('cnn_domain_calib'):
 
                 domain_vec_cnn = self.get_cnn_output(char_embed_dimen_calib, domain_embed_calib,
                                                      self.params['max_domain_segments_len'], domain_num_filters_calib,
-                                                     domain_filter_sizes_calib, is_training, dropout_rate_calib, trainable=False)
+                                                     domain_filter_sizes_calib, is_training, dropout_rate_calib, trainable=True)
 
                 for _ in range(n_fc_layers_calib - 1):
                     logits_domain = tf.contrib.layers.fully_connected(domain_vec_cnn, num_outputs=width_fc_layers_calib,
-                                                                    activation_fn=act_fn, trainable=False)
+                                                                    activation_fn=act_fn, trainable=True)
                     logits_domain = tf.layers.dropout(logits_domain, dropout_rate_calib, training=is_training)
 
                 logits_domain = tf.contrib.layers.fully_connected(logits_domain, num_outputs=width_final_rep,
-                                                                  activation_fn=act_fn, trainable=False)
-                logits_domain = tf.layers.dropout(logits_domain, dropout_rate, training=is_training)
+                                                                  activation_fn=act_fn, trainable=True)
+                logits_domain = tf.layers.dropout(logits_domain, dropout_rate_calib, training=is_training)
 
-            output_vectors.append(logits_domain)
+            # output_vectors.append(logits_domain)
 
         cat_layer = tf.concat(output_vectors + [x_suffix], -1)
 
@@ -349,8 +327,9 @@ class CharLevelClassifier_w_calib_domain:
 
         init = tf.global_variables_initializer()
 
-        print('Trainable Variables:')
-        print(tf.trainable_variables())
+        print('Trainable Variables:', tf.trainable_variables())
+        print('Non-Trainable Variables:', [v.name for v in set(tf.global_variables()) - set(tf.trainable_variables())
+                                           if v.name.split('/')[-1][:4] != 'Adam' and v.name.split('/')[-1][:4] != 'beta'])
 
         variables = slim.get_variables_to_restore()
         variables_to_restore = {v.name : v for v in variables if v.name.split('/')[0] == 'cnn_domain_calib'}
@@ -358,7 +337,7 @@ class CharLevelClassifier_w_calib_domain:
         saver_for_calib_restore = tf.train.Saver({**{"domain_embeddings_calib": domain_embeddings_calib}, **variables_to_restore})
 
         ''' Make sure all variables about the domain calibration part are non-trainable '''
-        assert [] == [v for v in tf.trainable_variables() if v.name.split('/')[0] == 'cnn_domain_calib']
+        # assert [] == [v for v in tf.trainable_variables() if v.name.split('/')[0] == 'cnn_domain_calib']
 
 
         ''' For TensorBoard '''

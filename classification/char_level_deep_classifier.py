@@ -33,7 +33,7 @@ n_fc_layers= 3
 act_fn = tf.nn.relu
 
 n_epochs = 100
-batch_size = 4000
+batch_size = 2000
 lr_rate = 0.001
 
 class_weighted = False
@@ -48,8 +48,7 @@ for cate, i in category2index.items():
 print(categories)
 
 # Creating the model
-print("Loading the FastText Model")
-# en_model = {"test":np.array([0]*300)}
+# print("Loading the FastText Model")
 # en_model = FastText.load_fasttext_format('../FastText/wiki.en/wiki.en')
 
 
@@ -65,15 +64,17 @@ class PosttrainCharLevelClassifier:
         self.domains_test = pickle.load(open(OUTPUT_DIR + 'test_domains_%s.list' % DATASET, 'rb'))
         self.domains_test = [d for cat_domains in self.domains_test for d in cat_domains]
 
-        self.charngram2index = defaultdict(lambda: len(self.charngram2index) + 1)  # index starts from 1. 0 is for padding
+        self.charngram2index = defaultdict(int)  # index starts from 1. 0 is for padding
         for domains in (self.domains_train, self.domains_val, self.domains_test):
             for domain in domains:
                 for word in domain['segmented_domain']:
-                    for i in range(max(1, len(word) - char_ngram)):  # some segments' lengths are less than char_ngram
-                        self.charngram2index[word[i : i + char_ngram]]
+                    word = ''.join(['<', word, '>'])
+                    for i in range(max(1, len(word) - char_ngram + 1)):  # some segments' lengths are less than char_ngram
+                        self.charngram2index[word[i : i + char_ngram]] = len(self.charngram2index) + 1
 
         ''' load params '''
         self.params = json.load(open(OUTPUT_DIR + 'params_%s.json' % DATASET))
+        self.params['max_segment_char_len'] += 2  # because '<' and '>' are appended to each word
         self.compute_class_weights()
 
     def compute_class_weights(self):
@@ -102,26 +103,19 @@ class PosttrainCharLevelClassifier:
                 embeds = []  # [[1,2,5,0,0], [35,3,7,8,4], ...]
                 # print(domains[i])
                 for word in domains[i]['segmented_domain']:
-                    embeds.append([self.charngram2index[word[start : start + char_ngram]] for start in range(max(1, len(word) - char_ngram))])
+                    word = ''.join(['<', word, '>'])
+                    embeds.append([self.charngram2index[word[start : start + char_ngram]] for start in range(max(1, len(word) - char_ngram + 1))])
 
                 domain_actual_lens.append(len(embeds))
 
                 ''' padding '''
                 # pad char-ngram level
-                # print(embeds)
                 embeds = [indices + [0] * (self.params['max_segment_char_len'] - char_ngram + 1 - len(indices))for indices in embeds]
-                # print(embeds)
-                # pad segment level
                 embeds += [[0] * (self.params['max_segment_char_len'] - char_ngram + 1) for _ in range(self.params['max_domain_segments_len'] - len(embeds))]
                 # X_batch_embed.append(tf.pad(embeds, paddings=[[0, n_extra_padding],[0,0]], mode="CONSTANT"))
                 X_batch_embed.append(embeds)
                 ''' mask '''
-                # print(embeds)
-                # print(np.array(embeds).shape)
                 X_batch_mask.append((np.array(embeds) != 0).astype(float))
-                # print(X_batch_mask)X_batch_mask
-                # print((np.array(embeds) != 0).astype(float))
-                # print()
 
                 ''' top-level domain (suffix) '''
                 one_hot_suf = np.zeros(self.params['num_suffix'])
@@ -151,6 +145,7 @@ class PosttrainCharLevelClassifier:
         total_loss = 0
         total_bool = []
         total_pred = []
+        n_batch = 0
         for X_batch_embed, X_batch_mask, domain_actual_lens, X_batch_suf, sample_weights, y_batch in self.next_batch(data):
             batch_correct, batch_loss, batch_bool, batch_pred = session.run(eval_nodes,
                                                          feed_dict={
@@ -167,7 +162,8 @@ class PosttrainCharLevelClassifier:
             total_correct += batch_correct
             total_bool.extend(batch_bool)
             total_pred.extend(batch_pred)
-        return total_loss / len(data), total_correct / len(data), total_bool, total_pred
+            n_batch += 1
+        return total_loss / n_batch, total_correct / len(data), total_bool, total_pred
 
 
 
@@ -280,7 +276,7 @@ class PosttrainCharLevelClassifier:
         with tf.Session() as sess:
             init.run()
             n_total_batches = int(np.ceil(len(self.domains_train) / batch_size))
-            test_accuracy_history = []
+            test_fscore_history = []
             for epoch in range(1, n_epochs + 1):
                 # model training
                 n_batch = 0
@@ -318,14 +314,6 @@ class PosttrainCharLevelClassifier:
                 print("*** On Test Set:\tloss = %.6f\taccuracy = %.4f" % (loss_test, acc_test))
 
                 print()
-                print("Classification Performance on individual classes:")
-                precisions_none, recalls_none, fscores_none, supports_none = precision_recall_fscore_support(
-                                              [category2index[domain['categories'][1]] for domain in self.domains_test],
-                                               pred_test, average=None)
-                print(tabulate(zip((categories[i] for i in range(len(precisions_none))),
-                                   precisions_none, recalls_none, fscores_none, supports_none),
-                               headers=['category', 'precision', 'recall', 'f-score', 'support'],
-                               tablefmt='orgtbl'))
                 print("Macro average:")
                 precisions_macro, recalls_macro, fscores_macro, _ = precision_recall_fscore_support(
                                               [category2index[domain['categories'][1]] for domain in self.domains_test],
@@ -335,8 +323,18 @@ class PosttrainCharLevelClassifier:
                 print()
 
 
-                if not test_accuracy_history or acc_test > max(test_accuracy_history):
+
+                if not test_fscore_history or fscores_macro > max(test_fscore_history):
                     # the accuracy of this epoch is the largest
+                    print("Classification Performance on individual classes:")
+                    precisions_none, recalls_none, fscores_none, supports_none = precision_recall_fscore_support(
+                        [category2index[domain['categories'][1]] for domain in self.domains_test],
+                        pred_test, average=None)
+                    print(tabulate(zip((categories[i] for i in range(len(precisions_none))),
+                                       precisions_none, recalls_none, fscores_none, supports_none),
+                                   headers=['category', 'precision', 'recall', 'f-score', 'support'],
+                                   tablefmt='orgtbl'))
+
                     # output all incorrect_prediction
                     with open(os.path.join(OUTPUT_DIR, 'incorrect_predictions.csv'), 'w') as outfile:
                         csv_writer = csv.writer(outfile)
@@ -348,7 +346,8 @@ class PosttrainCharLevelClassifier:
                                                  domain['segmented_domain'],
                                                  domain['categories'][1],
                                                  categories[pred_catIdx]))
-                test_accuracy_history.append(acc_test)
+
+                test_fscore_history.append(fscores_macro)
 
 
 

@@ -20,7 +20,7 @@ from gensim.models.wrappers import FastText
 
 DATASET = 'content'  # 'content' or '2340768'
 
-char_ngram = 4
+char_ngram_calib = 4
 
 domain_network_type = desc_classifier.domain_network_type
 desc_network_type = desc_classifier.desc_network_type
@@ -29,27 +29,27 @@ n_rnn_neurons = 300
 # For CNN
 domain_filter_sizes = [2,1]
 desc_filter_sizes = desc_classifier.desc_filter_sizes
-domain_num_filters = 800
+domain_num_filters = 256
 desc_num_filters = desc_classifier.desc_num_filters
 
-char_embed_dimen = 200
+char_embed_dimen = 50
 word_embed_dimen = desc_classifier.word_embed_dimen
 
 dropout_rate= 0.0  # dropout leads to worse performance
-n_fc_layers_domain = 4
-width_fc_layers_domain = 800
+n_fc_layers_domain = 3
+width_fc_layers_domain = 300
 n_fc_layers_desc= desc_classifier.n_fc_layers_desc
 width_fc_layers_desc = desc_classifier.width_fc_layers_desc
 width_final_rep = desc_classifier.width_fc_layers_desc
 
 act_fn = tf.nn.relu
 
-truncated_desc_words_len = desc_classifier.truncated_desc_words_len
+max_required_desc_words_len = desc_classifier.max_required_desc_words_len
 
 
 calibration_reg_factor = 0.00  # regularization leads to worse performance
 
-n_epochs = 10
+n_epochs = 12
 batch_size = 32
 autoencoder_lr_rate = 0.001
 
@@ -92,12 +92,22 @@ class domain_desc_calibrator:
         self.domains_test = [d for cat_domains in self.domains_test for d in cat_domains]
         print(len(self.domains_train), len(self.domains_val), len(self.domains_test))
 
-        self.charngram2index = pickle.load(open(os.path.join(OUTPUT_DIR, 'charngram2index.dict'), 'rb'))
+
         self.word2index = pickle.load(open(os.path.join(OUTPUT_DIR, 'word2index.dict'), 'rb'))
+
+        self.charngram2index = defaultdict(int)  # index starts from 1. 0 is for padding and unknown
+        for domains in (self.domains_train, self.domains_val, self.domains_test):
+            for domain in domains:
+                for word in domain['segmented_domain']:
+                    for i in range(max(1, len(word) - char_ngram_calib + 1)):  # some segments' lengths are less than char_ngram
+                        self.charngram2index[word[i: i + char_ngram_calib]] = len(self.charngram2index) + 1
+        pickle.dump(self.charngram2index, open(os.path.join(OUTPUT_DIR, 'charngram2index_calib.dict'), 'wb'))
+
 
         ''' load params '''
         self.params = json.load(open(OUTPUT_DIR + 'params_%s.json' % DATASET))
-        self.params['max_desc_words_len'] = min(truncated_desc_words_len, self.params['max_desc_words_len'])
+        self.truncated_desc_words_len = min(max_required_desc_words_len, self.params['max_desc_words_len'])
+        self.params['max_segment_char_len'] += 2  # because '<' and '>' are appended to each word
         self.compute_class_weights()
 
     def compute_class_weights(self):
@@ -128,28 +138,29 @@ class domain_desc_calibrator:
                 embeds = []  # [[1,2,5,0,0], [35,3,7,8,4], ...]
                 # print(domains[i])
                 for word in domains[i]['segmented_domain']:
-                    embeds.append([self.charngram2index[word[start : start + char_ngram]] for start in range(max(1, len(word) - char_ngram))])
+                    word = ''.join(['<', word, '>'])
+                    embeds.append([self.charngram2index[word[start : start + char_ngram_calib]] for start in range(max(1, len(word) - char_ngram_calib + 1))])
                 domain_actual_lens.append(len(embeds))
                 ''' domain char n-gram padding '''
                 # pad char-ngram level
-                embeds = [indices + [0] * (self.params['max_segment_char_len'] - char_ngram + 1 - len(indices))for indices in embeds]
+                embeds = [indices + [0] * (self.params['max_segment_char_len'] - char_ngram_calib + 1 - len(indices))for indices in embeds]
                 # pad segment level
-                embeds += [[0] * (self.params['max_segment_char_len'] - char_ngram + 1) for _ in range(self.params['max_domain_segments_len'] - len(embeds))]
+                embeds += [[0] * (self.params['max_segment_char_len'] - char_ngram_calib + 1) for _ in range(self.params['max_domain_segments_len'] - len(embeds))]
                 X_batch_domain.append(embeds)
                 ''' domain char n-gram mask '''
                 X_batch_domain_mask.append((np.array(embeds) != 0).astype(float))
 
 
                 ''' description '''
-                desc_indice = [self.word2index[word.lower()] for word in domains[i]['tokenized_desc'][ : self.params['max_desc_words_len']]]  # truncate
+                desc_indice = [self.word2index[word.lower()] for word in domains[i]['tokenized_desc'][ : self.truncated_desc_words_len]]  # truncate
                 desc_actual_lens.append(len(desc_indice))
                 ''' description padding '''
-                if self.params['max_desc_words_len'] >= len(desc_indice):
-                    desc_indice += [0] * (self.params['max_desc_words_len'] - len(desc_indice))
-                else:
-                    desc_indice += [0] * (self.params['max_desc_words_len'] - len(desc_indice))
+                if len(desc_indice) < self.truncated_desc_words_len:
+                    desc_indice += [0] * (self.truncated_desc_words_len - len(desc_indice))
+
                 X_batch_desc.append(desc_indice)
-                # assert len(desc_indice) == self.params['max_desc_words_len']
+                assert len(desc_indice) == self.truncated_desc_words_len
+
                 ''' description mask '''
                 X_batch_desc_mask.append((np.array(desc_indice) != 0).astype(float))
 
@@ -217,8 +228,8 @@ class domain_desc_calibrator:
         for filter_size in filter_sizes:
             # Define and initialize filters
             filter_shape = [filter_size, embed_dimen, 1, num_filters]
-            W_filter = tf.Variable(tf.truncated_normal(filter_shape, stddev=0.1), trainable=trainable) # initialize the filters' weights
-            b_filter = tf.Variable(tf.constant(0.1, shape=[num_filters]), trainable=trainable)  # initialize the filters' biases
+            W_filter = tf.Variable(tf.truncated_normal(filter_shape, stddev=0.1), trainable=trainable, name='W_filtersize_%d' % filter_size) # initialize the filters' weights
+            b_filter = tf.Variable(tf.constant(0.1, shape=[num_filters]), trainable=trainable, name='b_filtersize_%d' % filter_size)  # initialize the filters' biases
             # The conv2d operation expects a 4-D tensor with dimensions corresponding to batch, width, height and channel.
             # The result of our embedding doesnâ€™t contain the channel dimension
             # So we add it manually, leaving us with a layer of shape [None, sequence_length, embedding_size, 1].
@@ -242,9 +253,9 @@ class domain_desc_calibrator:
         is_training = tf.placeholder(tf.bool, shape=(), name='bool_train')
         # the input can be word indices or pre-trained FastText vectors
         # the input should be padded.
-        x_desc = tf.placeholder(tf.int32, shape=[None, self.params['max_desc_words_len']], name='desc_input')
+        x_desc = tf.placeholder(tf.int32, shape=[None, self.truncated_desc_words_len], name='desc_input')
         x_domain = tf.placeholder(tf.int32,shape=[None, self.params['max_domain_segments_len'],
-                                        self.params['max_segment_char_len'] - char_ngram + 1], name='domain_input')
+                                        self.params['max_segment_char_len'] - char_ngram_calib + 1], name='domain_input')
         desc_len = tf.placeholder(tf.int32, shape=[None], name='desc_length')
         domain_len = tf.placeholder(tf.int32, shape=[None], name='domain_length')
 
@@ -259,7 +270,7 @@ class domain_desc_calibrator:
         desc_embeddings = tf.Variable(tf.random_uniform([len(self.word2index), word_embed_dimen], -1.0, 1.0),
                                       trainable=False)
         desc_embed = tf.nn.embedding_lookup(desc_embeddings, x_desc)
-        desc_mask = tf.placeholder(tf.float32, shape=[None, self.params['max_desc_words_len']], name='desc_mask')
+        desc_mask = tf.placeholder(tf.float32, shape=[None, self.truncated_desc_words_len], name='desc_mask')
         desc_mask = tf.expand_dims(desc_mask, axis=-1)
         desc_mask = tf.tile(desc_mask, [1,1,word_embed_dimen])
         x_embed_desc = tf.multiply(desc_embed, desc_mask)
@@ -272,7 +283,7 @@ class domain_desc_calibrator:
             with tf.variable_scope('cnn_desc'):
 
                 desc_vec_cnn = self.get_cnn_output(word_embed_dimen, x_embed_desc,
-                                            self.params['max_desc_words_len'], desc_num_filters, desc_filter_sizes,
+                                            self.truncated_desc_words_len, desc_num_filters, desc_filter_sizes,
                                                    is_training, trainable=False)
 
                 for _ in range(n_fc_layers_desc):
@@ -298,7 +309,7 @@ class domain_desc_calibrator:
         domain_embeddings_calib = tf.Variable(tf.random_uniform([len(self.charngram2index), char_embed_dimen], -1.0, 1.0))
         domain_embed = tf.nn.embedding_lookup(domain_embeddings_calib, x_domain)
         domain_mask = tf.placeholder(tf.float32, shape=[None, self.params['max_domain_segments_len'],
-                                                 self.params['max_segment_char_len'] - char_ngram + 1], name='domain_mask')
+                                                 self.params['max_segment_char_len'] - char_ngram_calib + 1], name='domain_mask')
         domain_mask = tf.expand_dims(domain_mask, axis=-1)
         domain_mask = tf.tile(domain_mask, [1,1,1,char_embed_dimen])
         domain_embed = tf.multiply(domain_embed, domain_mask)
@@ -338,15 +349,16 @@ class domain_desc_calibrator:
 
         init = tf.global_variables_initializer()
 
-        print('Trainable Variables:')
-        print(tf.trainable_variables())
+        print('Trainable Variables:', tf.trainable_variables())
+        print('Non-Trainable Variables:', [v.name for v in set(tf.global_variables()) - set(tf.trainable_variables())
+                                           if v.name.split('/')[-1][:4] != 'Adam' and v.name.split('/')[-1][:4] != 'beta'])
 
         variables_to_restore = {v.name: v for v in tf.global_variables() if v.name.split('/')[0] == 'cnn_desc'}
         print("variables_to_restore:", ['desc_embeddings'] + sorted(variables_to_restore.keys()))
         saver_for_desc_restore = tf.train.Saver({**{"desc_embeddings" : desc_embeddings}, **variables_to_restore})
 
         variables_to_save = {v.name: v for v in tf.global_variables() if v.name.split('/')[0] == 'cnn_domain_calib'}
-        print("variables_to_save:", ['domain_embeddings'] + sorted(variables_to_save.keys()))
+        print("variables_to_save:", ['domain_embeddings_calib'] + sorted(variables_to_save.keys()))
         saver_for_domain_save = tf.train.Saver({**{'domain_embeddings_calib' : domain_embeddings_calib}, **variables_to_save})
 
         ''' Make sure all variables about desc CNN are non-trainable '''

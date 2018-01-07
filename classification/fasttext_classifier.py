@@ -20,7 +20,7 @@ type = 'CNN'
 # For RNN
 n_rnn_neurons = 300
 # For CNN
-filter_sizes = [2]
+filter_sizes = [2,1]
 num_filters = 512
 
 embed_dimen = 300
@@ -30,7 +30,7 @@ n_fc_layers= 3
 act_fn = tf.nn.relu
 
 n_epochs = 60
-batch_size = 5000
+batch_size = 4000
 lr_rate = 0.001
 
 class_weighted = False
@@ -46,8 +46,8 @@ print(categories)
 
 # Creating the model
 print("Loading the FastText Model")
-en_model = {"test":np.array([0]*300)}
-# en_model = FastText.load_fasttext_format('../FastText/wiki.en/wiki.en')
+# en_model = {"test":np.array([0]*300)}
+en_model = FastText.load_fasttext_format('../FastText/wiki.en/wiki.en')
 
 
 
@@ -87,7 +87,7 @@ class PretrainFastTextClassifier:
         start_index = 0
         while start_index < len(domains):
             for i in range(start_index, min(len(domains), start_index + batch_size)):
-                embeds = [en_model[w].tolist() for w in domains[i]['segmented_domain'] if w in en_model]
+                embeds = [en_model[''.join(['<', w, '>'])].tolist() for w in domains[i]['segmented_domain'] if w in en_model]
                 # if not embeds: # Skip if none of segments of this domain can not be recognized by FastText
                 #     continue
                 domain_actual_lens.append(len(embeds))
@@ -120,9 +120,9 @@ class PretrainFastTextClassifier:
         total_loss = 0
         total_bool = []
         total_pred = []
-        total_rank = 0
+        n_batch = 0
         for X_batch_embed, domain_actual_lens, X_batch_suf, sample_weights, y_batch in self.next_batch(data):
-            batch_correct, batch_loss, batch_bool, batch_rank, batch_pred = session.run(eval_nodes,
+            batch_correct, batch_loss, batch_bool, batch_pred = session.run(eval_nodes,
                                                          feed_dict={
                                                                     'bool_train:0': False,
                                                                     'embedding:0': X_batch_embed,
@@ -134,10 +134,10 @@ class PretrainFastTextClassifier:
             # print(batch_pred)
             total_loss += batch_loss
             total_correct += batch_correct
-            total_rank += batch_rank
             total_bool.extend(batch_bool)
             total_pred.extend(batch_pred)
-        return total_loss / len(data), total_correct / len(data), total_bool, total_rank / len(data), total_pred
+            n_batch += 1
+        return total_loss / n_batch, total_correct / len(data), total_bool, total_pred
 
 
 
@@ -278,34 +278,26 @@ class PretrainFastTextClassifier:
 
 
                 # evaluation on training data
-                eval_nodes = [n_correct, loss_mean, is_correct, rank_sum, prediction]
+                eval_nodes = [n_correct, loss_mean, is_correct, prediction]
                 print()
                 print("========== Evaluation at Epoch %d ==========" % epoch)
-                loss_train, acc_train, _, rank_train, _ = self.evaluate(self.domains_train, sess, eval_nodes)
-                print("*** On Training Set:\tloss = %.6f\taccuracy = %.4f\tMAP = %.4f"
-                      % (loss_train, acc_train, rank_train))
+                loss_train, acc_train, _, _ = self.evaluate(self.domains_train, sess, eval_nodes)
+                print("*** On Training Set:\tloss = %.6f\taccuracy = %.4f"
+                      % (loss_train, acc_train))
 
                 # evaluation on validation data
-                loss_val, acc_val, _, rank_val, _ = self.evaluate(self.domains_val, sess, eval_nodes)
-                print("*** On Validation Set:\tloss = %.6f\taccuracy = %.4f\tMAP = %.4f"
-                      % (loss_val, acc_val, rank_val))
+                loss_val, acc_val, _, _ = self.evaluate(self.domains_val, sess, eval_nodes)
+                print("*** On Validation Set:\tloss = %.6f\taccuracy = %.4f"
+                      % (loss_val, acc_val))
 
                 # evaluate on test data
-                loss_test, acc_test, is_correct_test, rank_test, pred_test = self.evaluate(self.domains_test, sess, eval_nodes)
-                print("*** On Test Set:\tloss = %.6f\taccuracy = %.4f\tMAP = %.4f"
-                      % (loss_test, acc_test, rank_test))
+                loss_test, acc_test, is_correct_test, pred_test = self.evaluate(self.domains_test, sess, eval_nodes)
+                print("*** On Test Set:\tloss = %.6f\taccuracy = %.4f"
+                      % (loss_test, acc_test))
 
 
 
                 print()
-                print("Classification Performance on individual classes:")
-                precisions_none, recalls_none, fscores_none, supports_none = precision_recall_fscore_support(
-                                              [category2index[domain['categories'][1]] for domain in self.domains_test],
-                                               pred_test, average=None)
-                print(tabulate(zip((categories[i] for i in range(len(precisions_none))),
-                                   precisions_none, recalls_none, fscores_none, supports_none),
-                               headers=['category', 'precision', 'recall', 'f-score', 'support'],
-                               tablefmt='orgtbl'))
                 print("Macro average:")
                 precisions_macro, recalls_macro, fscores_macro, _ = precision_recall_fscore_support(
                                               [category2index[domain['categories'][1]] for domain in self.domains_test],
@@ -318,6 +310,15 @@ class PretrainFastTextClassifier:
 
                 if not test_accuracy_history or acc_test > max(test_accuracy_history):
                     # the accuracy of this epoch is the largest
+                    print("Classification Performance on individual classes:")
+                    precisions_none, recalls_none, fscores_none, supports_none = precision_recall_fscore_support(
+                        [category2index[domain['categories'][1]] for domain in self.domains_test],
+                        pred_test, average=None)
+                    print(tabulate(zip((categories[i] for i in range(len(precisions_none))),
+                                       precisions_none, recalls_none, fscores_none, supports_none),
+                                   headers=['category', 'precision', 'recall', 'f-score', 'support'],
+                                   tablefmt='orgtbl'))
+
                     # output all incorrect_prediction
                     with open(os.path.join(OUTPUT_DIR, 'incorrect_predictions.csv'), 'w') as outfile:
                         csv_writer = csv.writer(outfile)
