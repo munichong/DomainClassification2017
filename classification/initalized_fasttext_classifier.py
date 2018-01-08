@@ -8,6 +8,7 @@ import tensorflow as tf
 from pprint import pprint
 from random import shuffle
 from tabulate import tabulate
+from collections import defaultdict
 from sklearn.metrics import precision_recall_fscore_support
 from datetime import datetime
 import warnings
@@ -15,6 +16,10 @@ warnings.filterwarnings(action='ignore', category=UserWarning, module='gensim')
 from gensim.models.wrappers import FastText
 
 DATASET = 'content'  # 'content' or '2340768'
+
+FROZEN = True
+
+char_ngram = 4
 
 type = 'CNN'
 # For RNN
@@ -29,11 +34,12 @@ dropout_rate= 0.2
 n_fc_layers= 3
 act_fn = tf.nn.relu
 
-n_epochs = 60
-batch_size = 4000
+n_epochs = 100
+batch_size = 2000
 lr_rate = 0.001
 
 class_weighted = False
+
 
 
 OUTPUT_DIR = '../Output/'
@@ -46,21 +52,36 @@ print(categories)
 
 # Creating the model
 print("Loading the FastText Model")
-# en_model = {"test":np.array([0]*300)}
 en_model = FastText.load_fasttext_format('../FastText/wiki.en/wiki.en')
+# print([a for a in en_model.wv.index2word if a[0] == '<' or a[-1] == '>'])
 
 
-
-class PretrainFastTextClassifier:
+class InitializedFasttextClassifier:
 
     def __init__(self):
         ''' load data '''
         self.domains_train = pickle.load(open(OUTPUT_DIR + 'training_domains_%s.list' % DATASET, 'rb'))
-        self.domains_train = [d for cat_domains in self.domains_train for d in cat_domains ]
+        self.domains_train = [d for cat_domains in self.domains_train for d in cat_domains]
         self.domains_val = pickle.load(open(OUTPUT_DIR + 'validation_domains_%s.list' % DATASET, 'rb'))
         self.domains_val = [d for cat_domains in self.domains_val for d in cat_domains]
         self.domains_test = pickle.load(open(OUTPUT_DIR + 'test_domains_%s.list' % DATASET, 'rb'))
         self.domains_test = [d for cat_domains in self.domains_test for d in cat_domains]
+
+        self.charngram2index = defaultdict(int)  # index starts from 1. 0 is for padding
+        for domains in (self.domains_train, self.domains_val, self.domains_test):
+            for domain in domains:
+                for word in domain['segmented_domain']:
+                    for i in range(max(1, len(word) - char_ngram + 1)):  # some segments' lengths are less than char_ngram
+                        self.charngram2index[word[i : i + char_ngram]] = len(self.charngram2index) + 1
+
+
+        ''' Use pre-train Fasttext to initialize a char-level embedding matrix '''
+        init_embed_mat = np.random.rand(max(self.charngram2index.values()) + 1, embed_dimen)
+        for charngram, index in self.charngram2index.items():
+            if charngram not in en_model:
+                continue
+            init_embed_mat[index,:] = en_model[charngram]
+        print("A char-level embedding matrix has been initialized by Fasttext")
 
         ''' load params '''
         self.params = json.load(open(OUTPUT_DIR + 'params_%s.json' % DATASET))
@@ -79,6 +100,7 @@ class PretrainFastTextClassifier:
 
     def next_batch(self, domains, batch_size=batch_size):
         X_batch_embed = []
+        X_batch_mask = []
         X_batch_suf = []
         domain_actual_lens = []
         sample_weights = []
@@ -87,27 +109,39 @@ class PretrainFastTextClassifier:
         start_index = 0
         while start_index < len(domains):
             for i in range(start_index, min(len(domains), start_index + batch_size)):
-                embeds = [en_model[w].tolist() for w in domains[i]['segmented_domain'] if w in en_model]
-                # if not embeds: # Skip if none of segments of this domain can not be recognized by FastText
-                #     continue
+                ''' get char n-gram indices '''
+                embeds = []  # [[1,2,5,0,0], [35,3,7,8,4], ...]
+                # print(domains[i])
+                for word in domains[i]['segmented_domain']:
+                    embeds.append([self.charngram2index[word[start : start + char_ngram]] for start in range(max(1, len(word) - char_ngram + 1))])
+
                 domain_actual_lens.append(len(embeds))
-                n_extra_padding = self.params['max_domain_segments_len'] - len(embeds)
-                embeds += [[0] * embed_dimen for _ in range(n_extra_padding)]
+
+                ''' padding '''
+                # pad char-ngram level
+                embeds = [indices + [0] * (self.params['max_segment_char_len'] - char_ngram + 1 - len(indices))for indices in embeds]
+                embeds += [[0] * (self.params['max_segment_char_len'] - char_ngram + 1) for _ in range(self.params['max_domain_segments_len'] - len(embeds))]
                 # X_batch_embed.append(tf.pad(embeds, paddings=[[0, n_extra_padding],[0,0]], mode="CONSTANT"))
                 X_batch_embed.append(embeds)
+                ''' mask '''
+                X_batch_mask.append((np.array(embeds) != 0).astype(float))
 
+                ''' top-level domain (suffix) '''
                 one_hot_suf = np.zeros(self.params['num_suffix'])
                 one_hot_suf[domains[i]['suffix_indices']] = 1.0 / len(domains[i]['suffix_indices'])
                 X_batch_suf.append(one_hot_suf)
 
+                ''' target category '''
                 sample_weights.append(self.class_weights[categories[domains[i]['target']]])
                 y_batch.append(domains[i]['target'])
-            yield np.array(X_batch_embed), np.array(domain_actual_lens), np.array(X_batch_suf), \
+
+            yield np.array(X_batch_embed), np.array(X_batch_mask), np.array(domain_actual_lens), np.array(X_batch_suf), \
                   np.array(sample_weights), np.array(y_batch)
 
             # print(sample_weights)
 
             X_batch_embed.clear()
+            X_batch_mask.clear()
             domain_actual_lens.clear()
             X_batch_suf.clear()
             sample_weights.clear()
@@ -121,11 +155,12 @@ class PretrainFastTextClassifier:
         total_bool = []
         total_pred = []
         n_batch = 0
-        for X_batch_embed, domain_actual_lens, X_batch_suf, sample_weights, y_batch in self.next_batch(data):
+        for X_batch_embed, X_batch_mask, domain_actual_lens, X_batch_suf, sample_weights, y_batch in self.next_batch(data):
             batch_correct, batch_loss, batch_bool, batch_pred = session.run(eval_nodes,
                                                          feed_dict={
                                                                     'bool_train:0': False,
                                                                     'embedding:0': X_batch_embed,
+                                                                    'embed_mask:0': X_batch_mask,
                                                                     'suffix:0': X_batch_suf,
                                                                     'length:0': domain_actual_lens,
                                                                     'weight:0': sample_weights,
@@ -147,11 +182,11 @@ class PretrainFastTextClassifier:
 
         # INPUTs
         is_training = tf.placeholder(tf.bool, shape=(), name='bool_train')
-        x_embed = tf.placeholder(tf.float32,
-                                 shape=[None, self.params['max_domain_segments_len'], embed_dimen],
+        x_char_ngram_indices = tf.placeholder(tf.int32,
+                                 shape=[None, self.params['max_domain_segments_len'],
+                                        self.params['max_segment_char_len'] - char_ngram + 1],
                                  name='embedding')
 
-        # print(x_embed.get_shape())
         x_suffix = tf.placeholder(tf.float32,
                                   shape=[None, self.params['num_suffix']],
                                   name='suffix')
@@ -161,15 +196,20 @@ class PretrainFastTextClassifier:
         sample_weights = tf.placeholder(tf.float32, shape=[None], name='weight')
         y = tf.placeholder(tf.int32, shape=[None], name='target') # Each entry in y must be an index in [0, num_classes)
 
-        # # embedding layers
-        # rnn_input = tf.convert_to_tensor([en_model[w] for w in tf.unstack(x_tokens)], dtype=tf.float32)
+        # embedding layers
+        # Look up embeddings for inputs.
+        embeddings = tf.Variable(tf.random_uniform([len(self.charngram2index), embed_dimen], -1.0, 1.0))
+        embed = tf.nn.embedding_lookup(embeddings, x_char_ngram_indices)
+        mask = tf.placeholder(tf.float32, shape=[None, self.params['max_domain_segments_len'],
+                                                 self.params['max_segment_char_len'] - char_ngram + 1],
+                              name='embed_mask')
+        mask = tf.expand_dims(mask, axis=-1)
+        mask = tf.tile(mask, [1,1,1,embed_dimen])
+        x_embed = tf.multiply(embed, mask)  # x_embed.shape: (None, self.params['max_domain_segments_len'],
+                                                             # self.params['max_segment_char_len'] - char_ngram + 1, embed_dimen)
+        x_embed = tf.reduce_mean(x_embed, 2)
 
-        # embeddings = tf.get_variable('embedding_matrix', [len(en_model.vocab), embed_dimen])
-        #
-        # rnn_input = tf.convert_to_tensor([tf.cond(w in en_model,
-        #                                           tf.nn.embedding_lookup(embeddings, x)[0,:],
-        #                                           )
-        #                                   for w in x_tokens])
+
 
         domain_vectors = []
         if 'RNN' in type:
@@ -186,7 +226,7 @@ class PretrainFastTextClassifier:
                 W_filter = tf.Variable(tf.truncated_normal(filter_shape, stddev=0.1)) # initialize the filters' weights
                 b_filter = tf.Variable(tf.constant(0.1, shape=[num_filters]))  # initialize the filters' biases
                 # The conv2d operation expects a 4-D tensor with dimensions corresponding to batch, width, height and channel.
-                # The result of our embedding doesn’t contain the channel dimension
+                # The result of our embedding doesnâ€™t contain the channel dimension
                 # So we add it manually, leaving us with a layer of shape [None, sequence_length, embedding_size, 1].
                 x_embed_expanded = tf.expand_dims(x_embed, -1)
                 conv = tf.nn.conv2d(x_embed_expanded, W_filter, strides=[1, 1, 1, 1], padding="VALID")
@@ -229,17 +269,6 @@ class PretrainFastTextClassifier:
         n_correct = tf.reduce_sum(tf.cast(is_correct, tf.float32))
         accuracy = tf.reduce_mean(tf.cast(is_correct, tf.float32))
 
-        '''
-        # ranking evaluation
-        ranked_res = tf.nn.top_k(logits, k=self.params['num_targets'], sorted=True).indices
-        y_2d = tf.reshape(y, (tf.shape(y)[0], 1))
-        a = tf.where(tf.equal(ranked_res, y_2d))
-        a = tf.gather_nd(a, ranked_res)
-        print(a)
-        print(a.shape)
-        rank_sum = tf.reduce_sum(a)[:, -1]
-        '''
-
         init = tf.global_variables_initializer()
 
 
@@ -256,15 +285,16 @@ class PretrainFastTextClassifier:
         with tf.Session() as sess:
             init.run()
             n_total_batches = int(np.ceil(len(self.domains_train) / batch_size))
-            test_accuracy_history = []
+            test_fscore_history = []
             for epoch in range(1, n_epochs + 1):
                 # model training
                 n_batch = 0
-                for X_batch_embed, domain_actual_lens, X_batch_suf, sample_weights, y_batch in self.next_batch(self.domains_train):
+                for X_batch_embed, X_batch_mask, domain_actual_lens, X_batch_suf, sample_weights, y_batch in self.next_batch(self.domains_train):
                     _, acc_batch_train, loss_batch_train, prediction_train = sess.run([training_op, accuracy, loss_mean, prediction],
                                                                     feed_dict={
                                                                                'bool_train:0': True,
                                                                                'embedding:0': X_batch_embed,
+                                                                               'embed_mask:0': X_batch_mask,
                                                                                'suffix:0': X_batch_suf,
                                                                                'length:0': domain_actual_lens,
                                                                                'weight:0': sample_weights,
@@ -282,20 +312,15 @@ class PretrainFastTextClassifier:
                 print()
                 print("========== Evaluation at Epoch %d ==========" % epoch)
                 loss_train, acc_train, _, _ = self.evaluate(self.domains_train, sess, eval_nodes)
-                print("*** On Training Set:\tloss = %.6f\taccuracy = %.4f"
-                      % (loss_train, acc_train))
+                print("*** On Training Set:\tloss = %.6f\taccuracy = %.4f" % (loss_train, acc_train))
 
                 # evaluation on validation data
                 loss_val, acc_val, _, _ = self.evaluate(self.domains_val, sess, eval_nodes)
-                print("*** On Validation Set:\tloss = %.6f\taccuracy = %.4f"
-                      % (loss_val, acc_val))
+                print("*** On Validation Set:\tloss = %.6f\taccuracy = %.4f" % (loss_val, acc_val))
 
                 # evaluate on test data
                 loss_test, acc_test, is_correct_test, pred_test = self.evaluate(self.domains_test, sess, eval_nodes)
-                print("*** On Test Set:\tloss = %.6f\taccuracy = %.4f"
-                      % (loss_test, acc_test))
-
-
+                print("*** On Test Set:\tloss = %.6f\taccuracy = %.4f" % (loss_test, acc_test))
 
                 print()
                 print("Macro average:")
@@ -308,7 +333,7 @@ class PretrainFastTextClassifier:
 
 
 
-                if not test_accuracy_history or acc_test > max(test_accuracy_history):
+                if not test_fscore_history or fscores_macro > max(test_fscore_history):
                     # the accuracy of this epoch is the largest
                     print("Classification Performance on individual classes:")
                     precisions_none, recalls_none, fscores_none, supports_none = precision_recall_fscore_support(
@@ -330,11 +355,12 @@ class PretrainFastTextClassifier:
                                                  domain['segmented_domain'],
                                                  domain['categories'][1],
                                                  categories[pred_catIdx]))
-                test_accuracy_history.append(acc_test)
+
+                test_fscore_history.append(fscores_macro)
 
 
 
 
 if __name__ == '__main__':
-    classifier = PretrainFastTextClassifier()
+    classifier = InitializedFasttextClassifier()
     classifier.run_graph()
