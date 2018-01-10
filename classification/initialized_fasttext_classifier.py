@@ -76,11 +76,11 @@ class InitializedFasttextClassifier:
 
 
         ''' Use pre-train Fasttext to initialize a char-level embedding matrix '''
-        init_embed_mat = np.random.rand(max(self.charngram2index.values()) + 1, embed_dimen)
+        self.init_embed_mat = np.random.uniform(low=-1.0, high=1.0, size=(max(self.charngram2index.values()) + 1, embed_dimen))
         for charngram, index in self.charngram2index.items():
             if charngram not in en_model:
                 continue
-            init_embed_mat[index,:] = en_model[charngram]
+            self.init_embed_mat[index,:] = en_model[charngram]
         print("A char-level embedding matrix has been initialized by Fasttext")
 
         ''' load params '''
@@ -110,16 +110,24 @@ class InitializedFasttextClassifier:
         while start_index < len(domains):
             for i in range(start_index, min(len(domains), start_index + batch_size)):
                 ''' get char n-gram indices '''
-                embeds = []  # [[1,2,5,0,0], [35,3,7,8,4], ...]
-                # print(domains[i])
+                embeds = []  # [1, 35, 3, 7, 8, ...]
                 for word in domains[i]['segmented_domain']:
-                    embeds.append([self.charngram2index[word[start : start + char_ngram]] for start in range(max(1, len(word) - char_ngram + 1))])
+                    temp = []
+                    isin = True
+                    for start in range(max(1, len(word) - char_ngram + 1)):
+                        charngram = word[start : start + char_ngram]
+                        if charngram not in en_model:
+                            isin = False
+                            break
+                        temp.append(self.charngram2index[char_ngram])
+                    if isin:
+                        embeds.append(temp)
 
                 domain_actual_lens.append(len(embeds))
 
                 ''' padding '''
                 # pad char-ngram level
-                embeds = [indices + [0] * (self.params['max_segment_char_len'] - char_ngram + 1 - len(indices))for indices in embeds]
+                embeds = [indices + [0] * (self.params['max_segment_char_len'] - char_ngram + 1 - len(indices)) for indices in embeds]
                 embeds += [[0] * (self.params['max_segment_char_len'] - char_ngram + 1) for _ in range(self.params['max_domain_segments_len'] - len(embeds))]
                 # X_batch_embed.append(tf.pad(embeds, paddings=[[0, n_extra_padding],[0,0]], mode="CONSTANT"))
                 X_batch_embed.append(embeds)
@@ -198,7 +206,7 @@ class InitializedFasttextClassifier:
 
         # embedding layers
         # Look up embeddings for inputs.
-        embeddings = tf.Variable(tf.random_uniform([len(self.charngram2index), embed_dimen], -1.0, 1.0))
+        embeddings = tf.Variable(self.init_embed_mat, trainable=False)
         embed = tf.nn.embedding_lookup(embeddings, x_char_ngram_indices)
         mask = tf.placeholder(tf.float32, shape=[None, self.params['max_domain_segments_len'],
                                                  self.params['max_segment_char_len'] - char_ngram + 1],

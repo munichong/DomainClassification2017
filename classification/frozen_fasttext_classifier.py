@@ -87,6 +87,7 @@ class PretrainFastTextClassifier:
         start_index = 0
         while start_index < len(domains):
             for i in range(start_index, min(len(domains), start_index + batch_size)):
+                # skip if a segment is not in en_model
                 embeds = [en_model[w].tolist() for w in domains[i]['segmented_domain'] if w in en_model]
                 # if not embeds: # Skip if none of segments of this domain can not be recognized by FastText
                 #     continue
