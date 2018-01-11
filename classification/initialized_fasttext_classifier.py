@@ -206,7 +206,7 @@ class InitializedFasttextClassifier:
 
         # embedding layers
         # Look up embeddings for inputs.
-        embeddings = tf.Variable(self.init_embed_mat, trainable=False)
+        embeddings = tf.Variable(self.init_embed_mat, trainable=not FROZEN)
         embed = tf.nn.embedding_lookup(embeddings, x_char_ngram_indices)
         mask = tf.placeholder(tf.float32, shape=[None, self.params['max_domain_segments_len'],
                                                  self.params['max_segment_char_len'] - char_ngram + 1],
@@ -255,7 +255,6 @@ class InitializedFasttextClassifier:
         # concatenate suffix one-hot and the abstract representation of the domains segments
         # The shape of cat_layer should be [batch_size, n_lstm_neurons+self.params['num_suffix']]
         cat_layer = tf.concat(domain_vectors + [x_suffix], -1)
-        # print(cat_layer.get_shape())
 
         for _ in range(n_fc_layers):
             logits = tf.contrib.layers.fully_connected(cat_layer, num_outputs=n_rnn_neurons, activation_fn=act_fn)
