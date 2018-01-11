@@ -67,12 +67,18 @@ class PosttrainCharLevelClassifier:
                     word = ''.join(['<', word, '>'])
                     for size in char_ngram_sizes:
                         for i in range(max(1, len(word) - size + 1)):  # some segments' lengths are less than char_ngram
+                            if word[i : i + size] in self.charngram2index:
+                                continue
                             self.charngram2index[word[i : i + size]] = len(self.charngram2index) + 1
+                    # the word itself is also added
+                    if word not in self.charngram2index:
+                        self.charngram2index[word] = len(self.charngram2index) + 1
 
         ''' load params '''
         self.params = json.load(open(OUTPUT_DIR + 'params_%s.json' % DATASET))
-        self.params['max_segment_char_len'] += 2  # because '<' and '>' are appended to each word
-        self.max_num_charngrams = sum(self.params['max_segment_char_len'] - size + 1 for size in char_ngram_sizes)
+        self.params['max_segment_char_len'] += 2  # because '<' and '>'are appended to each word
+        # the word itself is also added, thus: sum(...) + 1
+        self.max_num_charngrams = sum(self.params['max_segment_char_len'] - size + 1 for size in char_ngram_sizes) + 1
         self.compute_class_weights()
 
     def compute_class_weights(self):
@@ -103,7 +109,8 @@ class PosttrainCharLevelClassifier:
                 for word in domains[i]['segmented_domain']:
                     word = ''.join(['<', word, '>'])
                     for size in char_ngram_sizes:
-                        embeds.append([self.charngram2index[word[start : start + size]] for start in range(max(1, len(word) - size + 1))])
+                        # the word itself is also added
+                        embeds.append([word] + [self.charngram2index[word[start : start + size]] for start in range(max(1, len(word) - size + 1))])
 
                 domain_actual_lens.append(len(embeds))
 
