@@ -76,7 +76,8 @@ class InitializedFasttextClassifier:
 
 
         ''' Use pre-train Fasttext to initialize a char-level embedding matrix '''
-        self.init_embed_mat = np.random.uniform(low=-1.0, high=1.0, size=(max(self.charngram2index.values()) + 1, embed_dimen))
+        self.init_embed_mat = np.random.uniform(low=-1.0, high=1.0,
+                                                size=(max(self.charngram2index.values()) + 1, embed_dimen)).astype('float32')
         for charngram, index in self.charngram2index.items():
             if charngram not in en_model:
                 continue
