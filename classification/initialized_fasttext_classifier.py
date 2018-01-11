@@ -76,7 +76,8 @@ class InitializedFasttextClassifier:
 
 
         ''' Use pre-train Fasttext to initialize a char-level embedding matrix '''
-        self.init_embed_mat = np.random.uniform(low=-1.0, high=1.0, size=(max(self.charngram2index.values()) + 1, embed_dimen))
+        self.init_embed_mat = np.random.uniform(low=-1.0, high=1.0,
+                                                size=(max(self.charngram2index.values()) + 1, embed_dimen)).astype('float32')
         for charngram, index in self.charngram2index.items():
             if charngram not in en_model:
                 continue
@@ -206,7 +207,7 @@ class InitializedFasttextClassifier:
 
         # embedding layers
         # Look up embeddings for inputs.
-        embeddings = tf.Variable(self.init_embed_mat, trainable=False)
+        embeddings = tf.Variable(self.init_embed_mat, trainable=not FROZEN)
         embed = tf.nn.embedding_lookup(embeddings, x_char_ngram_indices)
         mask = tf.placeholder(tf.float32, shape=[None, self.params['max_domain_segments_len'],
                                                  self.params['max_segment_char_len'] - char_ngram + 1],
