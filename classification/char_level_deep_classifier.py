@@ -110,7 +110,7 @@ class PosttrainCharLevelClassifier:
                     word = ''.join(['<', word, '>'])
                     for size in char_ngram_sizes:
                         # the word itself is also added
-                        embeds.append([word] + [self.charngram2index[word[start : start + size]] for start in range(max(1, len(word) - size + 1))])
+                        embeds.append([self.charngram2index[word]] + [self.charngram2index[word[start : start + size]] for start in range(max(1, len(word) - size + 1))])
 
                 domain_actual_lens.append(len(embeds))
 
