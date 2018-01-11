@@ -111,7 +111,7 @@ class InitializedFasttextClassifier:
         while start_index < len(domains):
             for i in range(start_index, min(len(domains), start_index + batch_size)):
                 ''' get char n-gram indices '''
-                embeds = []  # [1, 35, 3, 7, 8, ...]
+                embeds = []  # [[1, 35, 3], [7, 8], ...]
                 for word in domains[i]['segmented_domain']:
                     temp = []
                     isin = True
@@ -257,6 +257,7 @@ class InitializedFasttextClassifier:
         # The shape of cat_layer should be [batch_size, n_lstm_neurons+self.params['num_suffix']]
         cat_layer = tf.concat(domain_vectors + [x_suffix], -1)
 
+        logits = None
         for _ in range(n_fc_layers):
             logits = tf.contrib.layers.fully_connected(cat_layer, num_outputs=n_rnn_neurons, activation_fn=act_fn)
             logits = tf.layers.dropout(logits, dropout_rate, training=is_training)
