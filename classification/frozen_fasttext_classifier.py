@@ -16,6 +16,8 @@ from gensim.models.wrappers import FastText
 
 DATASET = 'content'  # 'content' or '2340768'
 
+char_ngram_sizes=[3,6]
+
 type = 'CNN'
 # For RNN
 n_rnn_neurons = 300
@@ -48,7 +50,7 @@ print(categories)
 print("Loading the FastText Model")
 # en_model = {"test":np.array([0]*300)}
 en_model = FastText.load_fasttext_format('../FastText/wiki.en/wiki.en')
-
+en_model['wwwreal']
 
 class PretrainFastTextClassifier:
 
@@ -63,6 +65,7 @@ class PretrainFastTextClassifier:
 
         ''' load params '''
         self.params = json.load(open(OUTPUT_DIR + 'params_%s.json' % DATASET))
+        self.max_num_charngrams = sum(self.params['max_segment_char_len'] - size + 1 for size in char_ngram_sizes) + 1
         self.compute_class_weights()
 
     def compute_class_weights(self):
@@ -76,6 +79,15 @@ class PretrainFastTextClassifier:
         # self.class_weights['Arts'] = 0.8
         pprint(self.class_weights)
 
+    def compute_ngrams(self, word, min_n, max_n):
+        BOW, EOW = ('<', '>')  # Used by FastText to attach to all words as prefix and suffix
+        extended_word = BOW + word + EOW
+        ngrams = set()
+        for i in range(len(extended_word) - min_n + 1):
+            for j in range(min_n, max(len(extended_word) - max_n, max_n + 1)):
+                ngrams.add(extended_word[i:i + j])
+        return ngrams
+
     def next_batch(self, domains, batch_size=batch_size):
         X_batch_embed = []
         X_batch_suf = []
@@ -87,7 +99,46 @@ class PretrainFastTextClassifier:
         while start_index < len(domains):
             for i in range(start_index, min(len(domains), start_index + batch_size)):
                 # skip if a segment is not in en_model
+                '''
                 embeds = [en_model[w].tolist() for w in domains[i]['segmented_domain'] if w in en_model]
+                '''
+                embeds = []
+                for w in domains[i]['segmented_domain']:
+                    # word_vec = np.copy(en_model.wv.syn0[en_model.wv.vocab[w].index])
+                    count = 0
+                    # Raises a KeyError since none of the character ngrams of the word are present in the vocabulary
+                    try:
+                        word_vec = np.copy(en_model[w])
+                        count += 1
+                    except KeyError:
+                        word_vec = np.zeros(embed_dimen)
+                    ngrams = self.compute_ngrams(w, char_ngram_sizes[0], char_ngram_sizes[1])
+                    for ngram in ngrams:
+                        try:
+                            word_vec += en_model.wv.syn0_ngrams[en_model.wv.ngrams[ngram]]
+                            count += 1
+                        except KeyError:
+                            continue
+                    if count:
+                        word_vec /= count
+                    embeds.append(word_vec.tolist())
+
+
+                # ''' padding '''
+                # # pad char-ngram level
+                # for embed in embeds:
+                #     embed + [0] * (self.max_num_charngrams - len(embed))
+                #
+                # embeds = [embed + [0] * (self.max_num_charngrams - len(embed)) for embed in embeds]
+                # embeds += [[0] * self.max_num_charngrams for _ in
+                #            range(self.params['max_domain_segments_len'] - len(embeds))]
+                # # X_batch_embed.append(tf.pad(embeds, paddings=[[0, n_extra_padding],[0,0]], mode="CONSTANT"))
+                # X_batch_embed.append(embeds)
+                # print(embeds)
+                # print([len(e) for e in embeds])
+                # print(np.array(embeds).shape)
+
+
                 # if not embeds: # Skip if none of segments of this domain can not be recognized by FastText
                 #     continue
                 domain_actual_lens.append(len(embeds))
@@ -95,6 +146,9 @@ class PretrainFastTextClassifier:
                 embeds += [[0] * embed_dimen for _ in range(n_extra_padding)]
                 # X_batch_embed.append(tf.pad(embeds, paddings=[[0, n_extra_padding],[0,0]], mode="CONSTANT"))
                 X_batch_embed.append(embeds)
+                # print(embeds)
+                # print([len(e) for e in embeds])
+                # print(np.array(embeds).shape)
 
                 one_hot_suf = np.zeros(self.params['num_suffix'])
                 one_hot_suf[domains[i]['suffix_indices']] = 1.0 / len(domains[i]['suffix_indices'])
@@ -102,6 +156,13 @@ class PretrainFastTextClassifier:
 
                 sample_weights.append(self.class_weights[categories[domains[i]['target']]])
                 y_batch.append(domains[i]['target'])
+
+            # print(np.array(X_batch_embed).shape)
+            # print(np.array(domain_actual_lens))
+            # print(np.array(X_batch_suf))
+            # print(np.array(sample_weights))
+            # print(np.array(y_batch))
+
             yield np.array(X_batch_embed), np.array(domain_actual_lens), np.array(X_batch_suf), \
                   np.array(sample_weights), np.array(y_batch)
 
@@ -209,6 +270,7 @@ class PretrainFastTextClassifier:
         cat_layer = tf.concat(domain_vectors + [x_suffix], -1)
         # print(cat_layer.get_shape())
 
+        logits = None
         for _ in range(n_fc_layers):
             logits = tf.contrib.layers.fully_connected(cat_layer, num_outputs=n_rnn_neurons, activation_fn=act_fn)
             logits = tf.layers.dropout(logits, dropout_rate, training=is_training)

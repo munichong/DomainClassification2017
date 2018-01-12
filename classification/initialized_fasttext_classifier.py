@@ -69,25 +69,25 @@ en_model = FastText.load_fasttext_format('../FastText/wiki.en/wiki.en')
 #             ngrams.add(extended_word[i:i + j])
 #     return ngrams
 
-word_vec = np.copy(en_model.wv.syn0[en_model.wv.vocab['word'].index])
-print(word_vec)
-
+# word_vec = np.copy(en_model.wv.syn0[en_model.wv.vocab['word'].index])
+# print(word_vec)
+#
+# # print(en_model['word'] == word_vec)
+#
+#
+# # ngrams = set()
+# # for size in range(3, 7):
+# #     for start in range(len('word')-size+1):
+# #         ngrams.add('word'[start:start+size])
+# ngrams = en_model.compute_ngrams('word', 3, 6)
+# print(ngrams)
+# # ngrams = en_model.wv.ngrams_word['word']
+# ngram_weights = en_model.wv.syn0_ngrams
+# for ngram in ngrams:
+#     word_vec += ngram_weights[en_model.wv.ngrams[ngram]]
+# word_vec /= (len(ngrams) + 1)
+# print(word_vec)
 # print(en_model['word'] == word_vec)
-
-
-# ngrams = set()
-# for size in range(3, 7):
-#     for start in range(len('word')-size+1):
-#         ngrams.add('word'[start:start+size])
-ngrams = en_model.compute_ngrams('word', 3, 6)
-print(ngrams)
-# ngrams = en_model.wv.ngrams_word['word']
-ngram_weights = en_model.wv.syn0_ngrams
-for ngram in ngrams:
-    word_vec += ngram_weights[en_model.wv.ngrams[ngram]]
-word_vec /= (len(ngrams) + 1)
-print(word_vec)
-print(en_model['word'] == word_vec)
 
 
 
