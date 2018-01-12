@@ -14,10 +14,11 @@ from datetime import datetime
 import warnings
 warnings.filterwarnings(action='ignore', category=UserWarning, module='gensim')
 from gensim.models.wrappers import FastText
+from gensim.models.wrappers.fasttext import compute_ngrams
 
 DATASET = 'content'  # 'content' or '2340768'
 
-char_ngram_sizes = [4]  # [3,6]
+char_ngram_sizes = [4,4]
 
 type = 'CNN'
 # For RNN
@@ -33,7 +34,7 @@ n_fc_layers= 3
 act_fn = tf.nn.relu
 
 n_epochs = 100
-batch_size = 2000
+batch_size = 1000
 lr_rate = 0.001
 
 class_weighted = False
@@ -64,21 +65,16 @@ class PosttrainCharLevelClassifier:
         for domains in (self.domains_train, self.domains_val, self.domains_test):
             for domain in domains:
                 for word in domain['segmented_domain']:
-                    word = ''.join(['<', word, '>'])
-                    for size in char_ngram_sizes:
-                        for i in range(max(1, len(word) - size + 1)):  # some segments' lengths are less than char_ngram
-                            if word[i : i + size] in self.charngram2index:
-                                continue
-                            self.charngram2index[word[i : i + size]] = len(self.charngram2index) + 1
-                    # the word itself is also added
-                    if word not in self.charngram2index:
-                        self.charngram2index[word] = len(self.charngram2index) + 1
+                    for ngram in compute_ngrams(word, *char_ngram_sizes):
+                        if ngram in self.charngram2index:
+                            continue
+                        self.charngram2index[ngram] = len(self.charngram2index) + 1
 
         ''' load params '''
         self.params = json.load(open(OUTPUT_DIR + 'params_%s.json' % DATASET))
         self.params['max_segment_char_len'] += 2  # because '<' and '>'are appended to each word
         # the word itself is also added, thus: sum(...) + 1
-        self.max_num_charngrams = sum(self.params['max_segment_char_len'] - size + 1 for size in char_ngram_sizes) + 1
+        self.max_num_charngrams = len(compute_ngrams(''.join(['a'] * self.params['max_segment_char_len']), *char_ngram_sizes))
         self.compute_class_weights()
 
     def compute_class_weights(self):
@@ -107,10 +103,7 @@ class PosttrainCharLevelClassifier:
                 ''' get char n-gram indices '''
                 embeds = []  # [[1,2,5,0,0], [35,3,7,8,4], ...]
                 for word in domains[i]['segmented_domain']:
-                    word = ''.join(['<', word, '>'])
-                    for size in char_ngram_sizes:
-                        # the word itself is also added
-                        embeds.append([self.charngram2index[word]] + [self.charngram2index[word[start : start + size]] for start in range(max(1, len(word) - size + 1))])
+                        embeds.append([self.charngram2index[ngram] for ngram in compute_ngrams(word, *char_ngram_sizes)])
 
                 domain_actual_lens.append(len(embeds))
 
@@ -120,6 +113,10 @@ class PosttrainCharLevelClassifier:
                 embeds += [[0] * self.max_num_charngrams for _ in range(self.params['max_domain_segments_len'] - len(embeds))]
                 # X_batch_embed.append(tf.pad(embeds, paddings=[[0, n_extra_padding],[0,0]], mode="CONSTANT"))
                 X_batch_embed.append(embeds)
+                # print(domains[i]['segmented_domain'])
+                # print(embeds)
+                # print(np.array(embeds).shape)
+
                 ''' mask '''
                 X_batch_mask.append((np.array(embeds) != 0).astype(float))
 

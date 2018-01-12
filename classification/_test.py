@@ -19,10 +19,11 @@ print(type(en_model))
 
 def ft_embed(word):
     if word in en_model.wv.vocab:
-        return FastTextKeyedVectors().word_vec(word)
+        return super(FastTextKeyedVectors, en_model.wv).word_vec(word)
 
     word_vec = np.zeros(en_model.wv.syn0_ngrams.shape[1], dtype=np.float32)
     ngrams = compute_ngrams(word, 3, 6)
+    print(ngrams)
     ngrams = [ng for ng in ngrams if ng in en_model.wv.ngrams]
     ngram_weights = en_model.wv.syn0_ngrams
     for ngram in ngrams:

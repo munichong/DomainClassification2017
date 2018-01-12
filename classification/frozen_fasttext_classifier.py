@@ -50,7 +50,7 @@ print(categories)
 print("Loading the FastText Model")
 # en_model = {"test":np.array([0]*300)}
 en_model = FastText.load_fasttext_format('../FastText/wiki.en/wiki.en')
-en_model['wwwreal']
+
 
 class PretrainFastTextClassifier:
 
