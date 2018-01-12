@@ -53,7 +53,43 @@ print(categories)
 # Creating the model
 print("Loading the FastText Model")
 en_model = FastText.load_fasttext_format('../FastText/wiki.en/wiki.en')
-# print([a for a in en_model.wv.index2word if a[0] == '<' or a[-1] == '>'])
+# print(list(en_model.wv.vocab.items())[:10])
+# print(en_model.wv.ngrams['sub'])  # get the index of 'sub'
+# print(en_model.wv.syn0_ngrams[en_model.wv.ngrams['sub']])  # get the vector of the ngram
+# print('The index:', en_model.wv.vocab['word'].index)
+# print(en_model.wv.syn0[en_model.wv.vocab['word'].index])
+
+# def compute_ngrams(word, min_n, max_n):
+#     ngram_indices = []
+#     BOW, EOW = ('<', '>')  # Used by FastText to attach to all words as prefix and suffix
+#     extended_word = BOW + word + EOW
+#     ngrams = set()
+#     for i in range(len(extended_word) - min_n + 1):
+#         for j in range(min_n, max(len(extended_word) - max_n, max_n + 1)):
+#             ngrams.add(extended_word[i:i + j])
+#     return ngrams
+
+word_vec = np.copy(en_model.wv.syn0[en_model.wv.vocab['word'].index])
+print(word_vec)
+
+# print(en_model['word'] == word_vec)
+
+
+# ngrams = set()
+# for size in range(3, 7):
+#     for start in range(len('word')-size+1):
+#         ngrams.add('word'[start:start+size])
+ngrams = en_model.compute_ngrams('word', 3, 6)
+print(ngrams)
+# ngrams = en_model.wv.ngrams_word['word']
+ngram_weights = en_model.wv.syn0_ngrams
+for ngram in ngrams:
+    word_vec += ngram_weights[en_model.wv.ngrams[ngram]]
+word_vec /= (len(ngrams) + 1)
+print(word_vec)
+print(en_model['word'] == word_vec)
+
+
 
 
 class InitializedFasttextClassifier:
