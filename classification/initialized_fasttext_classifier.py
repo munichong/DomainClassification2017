@@ -19,7 +19,7 @@ DATASET = 'content'  # 'content' or '2340768'
 
 FROZEN = True
 
-char_ngram = 4
+char_ngram_sizes = [3,6]
 
 type = 'CNN'
 # For RNN
@@ -107,8 +107,14 @@ class InitializedFasttextClassifier:
         for domains in (self.domains_train, self.domains_val, self.domains_test):
             for domain in domains:
                 for word in domain['segmented_domain']:
-                    for i in range(max(1, len(word) - char_ngram + 1)):  # some segments' lengths are less than char_ngram
-                        self.charngram2index[word[i : i + char_ngram]] = len(self.charngram2index) + 1
+                    for size in char_ngram_sizes:
+                        for i in range(max(1, len(word) - size + 1)):  # some segments' lengths are less than char_ngram
+                            if word[i : i + size] in self.charngram2index:
+                                continue
+                            self.charngram2index[word[i : i + size]] = len(self.charngram2index) + 1
+                    # the word itself is also added
+                    if word not in self.charngram2index:
+                        self.charngram2index[word] = len(self.charngram2index) + 1
 
 
         ''' Use pre-train Fasttext to initialize a char-level embedding matrix '''
@@ -122,6 +128,8 @@ class InitializedFasttextClassifier:
 
         ''' load params '''
         self.params = json.load(open(OUTPUT_DIR + 'params_%s.json' % DATASET))
+        # the word itself is also added, thus: sum(...) + 1
+        self.max_num_charngrams = sum(self.params['max_segment_char_len'] - size + 1 for size in char_ngram_sizes) + 1
         self.compute_class_weights()
 
     def compute_class_weights(self):
@@ -147,26 +155,27 @@ class InitializedFasttextClassifier:
         while start_index < len(domains):
             for i in range(start_index, min(len(domains), start_index + batch_size)):
                 ''' get char n-gram indices '''
-                embeds = []  # [1, 35, 3, 7, 8, ...]
+                embeds = []  # [[1, 35, 3], [7, 8], ...]
                 for word in domains[i]['segmented_domain']:
                     temp = []
                     isin = True
-                    for start in range(max(1, len(word) - char_ngram + 1)):
-                        charngram = word[start : start + char_ngram]
-                        if charngram not in en_model:
-                            isin = False
-                            break
-                        temp.append(self.charngram2index[char_ngram])
+                    for size in char_ngram_sizes:
+                        for start in range(max(1, len(word) - size + 1)):
+                            charngram = word[start : start + size]
+                            if charngram not in en_model:
+                                isin = False
+                                break
+                            temp.append(self.charngram2index[charngram])
                     if isin:
-                        embeds.append(temp)
+                        embeds.append([self.charngram2index[word]] + temp)
 
                 domain_actual_lens.append(len(embeds))
 
                 ''' padding '''
                 # pad char-ngram level
-                embeds = [indices + [0] * (self.params['max_segment_char_len'] - char_ngram + 1 - len(indices)) for indices in embeds]
-                embeds += [[0] * (self.params['max_segment_char_len'] - char_ngram + 1) for _ in range(self.params['max_domain_segments_len'] - len(embeds))]
-                # X_batch_embed.append(tf.pad(embeds, paddings=[[0, n_extra_padding],[0,0]], mode="CONSTANT"))
+                embeds = [indices + [0] * (self.max_num_charngrams - len(indices)) for indices in embeds]
+                embeds += [[0] * self.max_num_charngrams for _ in
+                           range(self.params['max_domain_segments_len'] - len(embeds))]
                 X_batch_embed.append(embeds)
                 ''' mask '''
                 X_batch_mask.append((np.array(embeds) != 0).astype(float))
@@ -229,7 +238,7 @@ class InitializedFasttextClassifier:
         is_training = tf.placeholder(tf.bool, shape=(), name='bool_train')
         x_char_ngram_indices = tf.placeholder(tf.int32,
                                  shape=[None, self.params['max_domain_segments_len'],
-                                        self.params['max_segment_char_len'] - char_ngram + 1],
+                                        self.max_num_charngrams],
                                  name='embedding')
 
         x_suffix = tf.placeholder(tf.float32,
@@ -246,12 +255,12 @@ class InitializedFasttextClassifier:
         embeddings = tf.Variable(self.init_embed_mat, trainable=not FROZEN)
         embed = tf.nn.embedding_lookup(embeddings, x_char_ngram_indices)
         mask = tf.placeholder(tf.float32, shape=[None, self.params['max_domain_segments_len'],
-                                                 self.params['max_segment_char_len'] - char_ngram + 1],
+                                                 self.max_num_charngrams],
                               name='embed_mask')
         mask = tf.expand_dims(mask, axis=-1)
         mask = tf.tile(mask, [1,1,1,embed_dimen])
         x_embed = tf.multiply(embed, mask)  # x_embed.shape: (None, self.params['max_domain_segments_len'],
-                                                             # self.params['max_segment_char_len'] - char_ngram + 1, embed_dimen)
+                                                             # self.max_num_charngrams, embed_dimen)
         x_embed = tf.reduce_mean(x_embed, 2)
 
 
@@ -292,8 +301,8 @@ class InitializedFasttextClassifier:
         # concatenate suffix one-hot and the abstract representation of the domains segments
         # The shape of cat_layer should be [batch_size, n_lstm_neurons+self.params['num_suffix']]
         cat_layer = tf.concat(domain_vectors + [x_suffix], -1)
-        # print(cat_layer.get_shape())
 
+        logits = None
         for _ in range(n_fc_layers):
             logits = tf.contrib.layers.fully_connected(cat_layer, num_outputs=n_rnn_neurons, activation_fn=act_fn)
             logits = tf.layers.dropout(logits, dropout_rate, training=is_training)

@@ -50,7 +50,6 @@ print("Loading the FastText Model")
 en_model = FastText.load_fasttext_format('../FastText/wiki.en/wiki.en')
 
 
-
 class PretrainFastTextClassifier:
 
     def __init__(self):
