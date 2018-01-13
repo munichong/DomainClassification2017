@@ -10,6 +10,24 @@ warnings.filterwarnings(action='ignore', category=UserWarning, module='gensim')
 from gensim.models.wrappers import FastText
 from gensim.models.wrappers.fasttext import compute_ngrams, FastTextKeyedVectors
 
+
+
+# print(sorted(compute_ngrams("word", 4, 5)))
+
+# a = []
+# word = 'aaaaaa'
+# word = ''.join(['<', word, '>'])
+# for size in [4, 5]:
+#     for i in range(max(1, len(word) - size + 1)):  # some segments' lengths are less than char_ngram
+#         a.append(word[i : i + size])
+#
+# print(sorted(a))
+
+
+
+
+
+
 print("Loading the FastText Model")
 # en_model = {"test":np.array([0]*300)}
 en_model = FastText.load_fasttext_format('../FastText/wiki.en/wiki.en')
