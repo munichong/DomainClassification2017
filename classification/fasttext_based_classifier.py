@@ -39,6 +39,9 @@ lr_rate = 0.001
 
 class_weighted = False
 
+FROZEN = False
+FT_INITIAL = False
+
 
 OUTPUT_DIR = '../Output/'
 
@@ -48,9 +51,14 @@ for cate, i in category2index.items():
     categories[i] = cate
 print(categories)
 
+# Creating the model
+print("Loading the FastText Model")
+# en_model = {"test":np.array([0]*300)}
+en_model = FastText.load_fasttext_format('../FastText/wiki.en/wiki.en')
 
 
-class PosttrainCharLevelClassifier:
+
+class FastTextBasedClassifier:
 
     def __init__(self):
         ''' load data '''
@@ -65,23 +73,21 @@ class PosttrainCharLevelClassifier:
         for domains in (self.domains_train, self.domains_val, self.domains_test):
             for domain in domains:
                 for word in domain['segmented_domain']:
-
                     for ngram in compute_ngrams(word, *char_ngram_sizes):
                         if ngram in self.charngram2index:
                             continue
                         self.charngram2index[ngram] = len(self.charngram2index) + 1
 
-                    '''
-                    word = ''.join(['<', word, '>'])
-                    for size in char_ngram_sizes:
-                        for i in range(max(1, len(word) - size + 1)):  # some segments' lengths are less than char_ngram
-                            if word[i : i + size] in self.charngram2index:
-                                continue
-                            self.charngram2index[word[i : i + size]] = len(self.charngram2index) + 1
-                    # the word itself is also added
-                    if word not in self.charngram2index:
-                        self.charngram2index[word] = len(self.charngram2index) + 1
-                    '''
+        self.inital_ngram_embed = np.random.uniform(low=-1.0, high=1.0, size=(max(self.charngram2index.values) + 1, embed_dimen)).astype('float32')
+        if FT_INITIAL:
+            for ngram, index in self.charngram2index.items():
+                if ngram not in en_model:
+                    if FROZEN:
+                        self.inital_ngram_embed[index, :] = np.zeros(shape=embed_dimen, dtype='float32')
+                else:
+                    self.inital_ngram_embed[index,:] = en_model[ngram]
+
+
 
         ''' load params '''
         self.params = json.load(open(OUTPUT_DIR + 'params_%s.json' % DATASET))
@@ -208,7 +214,7 @@ class PosttrainCharLevelClassifier:
 
         # embedding layers
         # Look up embeddings for inputs.
-        embeddings = tf.Variable(tf.random_uniform([len(self.charngram2index), embed_dimen], -1.0, 1.0))
+        embeddings = tf.Variable(self.inital_ngram_embed, trainable=not FROZEN)
         embed = tf.nn.embedding_lookup(embeddings, x_char_ngram_indices)
         mask = tf.placeholder(tf.float32, shape=[None, self.params['max_domain_segments_len'],
                                                  self.max_num_charngrams],
@@ -373,5 +379,5 @@ class PosttrainCharLevelClassifier:
 
 
 if __name__ == '__main__':
-    classifier = PosttrainCharLevelClassifier()
+    classifier = FastTextBasedClassifier()
     classifier.run_graph()
