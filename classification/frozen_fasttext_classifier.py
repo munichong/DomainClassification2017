@@ -88,8 +88,8 @@ class PretrainFastTextClassifier:
             for i in range(start_index, min(len(domains), start_index + batch_size)):
                 # skip if a segment is not in en_model
                 embeds = [en_model[w].tolist() for w in domains[i]['segmented_domain'] if w in en_model]
-                # if not embeds: # Skip if none of segments of this domain can not be recognized by FastText
-                #     continue
+                if not embeds: # Skip if none of segments of this domain can not be recognized by FastText
+                    continue
                 domain_actual_lens.append(len(embeds))
                 n_extra_padding = self.params['max_domain_segments_len'] - len(embeds)
                 embeds += [[0] * embed_dimen for _ in range(n_extra_padding)]
@@ -256,7 +256,7 @@ class PretrainFastTextClassifier:
         with tf.Session() as sess:
             init.run()
             n_total_batches = int(np.ceil(len(self.domains_train) / batch_size))
-            test_accuracy_history = []
+            test_fscore_history = []
             for epoch in range(1, n_epochs + 1):
                 # model training
                 n_batch = 0
@@ -308,7 +308,7 @@ class PretrainFastTextClassifier:
 
 
 
-                if not test_accuracy_history or acc_test > max(test_accuracy_history):
+                if not test_fscore_history or fscores_macro > max(test_fscore_history):
                     # the accuracy of this epoch is the largest
                     print("Classification Performance on individual classes:")
                     precisions_none, recalls_none, fscores_none, supports_none = precision_recall_fscore_support(
@@ -330,7 +330,7 @@ class PretrainFastTextClassifier:
                                                  domain['segmented_domain'],
                                                  domain['categories'][1],
                                                  categories[pred_catIdx]))
-                test_accuracy_history.append(acc_test)
+                test_fscore_history.append(fscores_macro)
 
 
 

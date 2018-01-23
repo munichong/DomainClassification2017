@@ -12,16 +12,14 @@ from gensim.models.wrappers.fasttext import compute_ngrams, FastTextKeyedVectors
 
 
 
-# print(sorted(compute_ngrams("word", 4, 5)))
-
-# a = []
-# word = 'aaaaaa'
-# word = ''.join(['<', word, '>'])
-# for size in [4, 5]:
-#     for i in range(max(1, len(word) - size + 1)):  # some segments' lengths are less than char_ngram
-#         a.append(word[i : i + size])
-#
-# print(sorted(a))
+print(sorted(compute_ngrams("word", 4, 5)))
+a = []
+word = 'aaaaaa'
+word = ''.join(['<', word, '>'])
+for size in [4, 5]:
+    for i in range(max(1, len(word) - size + 1)):  # some segments' lengths are less than char_ngram
+        a.append(word[i : i + size])
+print(sorted(a))
 
 
 
@@ -41,7 +39,6 @@ def ft_embed(word):
 
     word_vec = np.zeros(en_model.wv.syn0_ngrams.shape[1], dtype=np.float32)
     ngrams = compute_ngrams(word, 3, 6)
-    print(ngrams)
     ngrams = [ng for ng in ngrams if ng in en_model.wv.ngrams]
     ngram_weights = en_model.wv.syn0_ngrams
     for ngram in ngrams:

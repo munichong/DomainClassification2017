@@ -18,7 +18,7 @@ from gensim.models.wrappers.fasttext import compute_ngrams
 
 DATASET = 'content'  # 'content' or '2340768'
 
-char_ngram_sizes = [4,4]  # [3,6]
+char_ngram_sizes = [3,6]  # [3,6]
 
 type = 'CNN'
 # For RNN
@@ -33,14 +33,14 @@ dropout_rate= 0.2
 n_fc_layers= 3
 act_fn = tf.nn.relu
 
-n_epochs = 100
-batch_size = 2000
-lr_rate = 0.001
+n_epochs = 80
+batch_size = 1000
+lr_rate = 0.0005
 
 class_weighted = False
 
-FROZEN = False
-FT_INITIAL = False
+FROZEN = True
+FT_INITIAL = True
 
 
 OUTPUT_DIR = '../Output/'
@@ -78,12 +78,13 @@ class FastTextBasedClassifier:
                             continue
                         self.charngram2index[ngram] = len(self.charngram2index) + 1
 
-        self.inital_ngram_embed = np.random.uniform(low=-1.0, high=1.0, size=(max(self.charngram2index.values) + 1, embed_dimen)).astype('float32')
+        self.inital_ngram_embed = np.random.uniform(low=-1.0, high=1.0, size=(max(self.charngram2index.values()) + 1, embed_dimen)).astype('float32')
         if FT_INITIAL:
             for ngram, index in self.charngram2index.items():
                 if ngram not in en_model:
-                    if FROZEN:
-                        self.inital_ngram_embed[index, :] = np.zeros(shape=embed_dimen, dtype='float32')
+                    # if FROZEN:
+                        # self.inital_ngram_embed[index, :] = np.zeros(shape=embed_dimen, dtype='float32')
+                    continue
                 else:
                     self.inital_ngram_embed[index,:] = en_model[ngram]
 
@@ -123,16 +124,17 @@ class FastTextBasedClassifier:
         while start_index < len(domains):
             for i in range(start_index, min(len(domains), start_index + batch_size)):
                 ''' get char n-gram indices '''
-                embeds = []  # [[1,2,5,0,0], [35,3,7,8,4], ...]
+                embeds = []  # [[[1,2,5,0,0], [35,3,7,8,4]], ...]
                 for word in domains[i]['segmented_domain']:
-                    embeds.append([self.charngram2index[ngram] for ngram in compute_ngrams(word, *char_ngram_sizes)])
+                    if FT_INITIAL:
+                        embeds.append(
+                            [self.charngram2index[ngram] for ngram in compute_ngrams(word, *char_ngram_sizes)
+                             if ngram in en_model])
+                    else:
+                        embeds.append([self.charngram2index[ngram] for ngram in compute_ngrams(word, *char_ngram_sizes)])
 
-                    '''    
-                    word = ''.join(['<', word, '>'])
-                    for size in char_ngram_sizes:
-                        # the word itself is also added
-                        embeds.append([self.charngram2index[word]] + [self.charngram2index[word[start : start + size]] for start in range(max(1, len(word) - size + 1))])
-                    '''
+                if not embeds or not any(embeds):
+                    continue
                 domain_actual_lens.append(len(embeds))
 
                 ''' padding '''
