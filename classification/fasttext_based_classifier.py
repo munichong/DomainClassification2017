@@ -37,7 +37,11 @@ n_epochs = 80
 batch_size = 1000
 lr_rate = 0.0005
 
+
 class_weighted = False
+
+
+REDUCE_TO_WORD_LEVEL = True
 
 FROZEN = True
 FT_INITIAL = True
@@ -53,7 +57,6 @@ print(categories)
 
 # Creating the model
 print("Loading the FastText Model")
-# en_model = {"test":np.array([0]*300)}
 en_model = FastText.load_fasttext_format('../FastText/wiki.en/wiki.en')
 
 
@@ -69,11 +72,19 @@ class FastTextBasedClassifier:
         self.domains_test = pickle.load(open(OUTPUT_DIR + 'test_domains_%s.list' % DATASET, 'rb'))
         self.domains_test = [d for cat_domains in self.domains_test for d in cat_domains]
 
+        max_domain_len = 0
         self.charngram2index = defaultdict(int)  # index starts from 1. 0 is for padding
         for domains in (self.domains_train, self.domains_val, self.domains_test):
             for domain in domains:
-                for word in domain['segmented_domain']:
-                    for ngram in compute_ngrams(word, *char_ngram_sizes):
+                max_domain_len = max(max_domain_len, len(domain['domain']))
+                if REDUCE_TO_WORD_LEVEL:
+                    for word in domain['segmented_domain']:
+                        for ngram in compute_ngrams(word, *char_ngram_sizes):
+                            if ngram in self.charngram2index:
+                                continue
+                            self.charngram2index[ngram] = len(self.charngram2index) + 1
+                else:
+                    for ngram in compute_ngrams(domain['domain'], *char_ngram_sizes):
                         if ngram in self.charngram2index:
                             continue
                         self.charngram2index[ngram] = len(self.charngram2index) + 1
@@ -92,12 +103,12 @@ class FastTextBasedClassifier:
 
         ''' load params '''
         self.params = json.load(open(OUTPUT_DIR + 'params_%s.json' % DATASET))
-        self.params['max_segment_char_len'] += 2  # because '<' and '>'are appended to each word
         # the word itself is also added, thus: sum(...) + 1
-        self.max_num_charngrams = len(compute_ngrams(''.join(['a'] * self.params['max_segment_char_len']), *char_ngram_sizes))
-        '''
-        self.max_num_charngrams = sum(self.params['max_segment_char_len'] - size + 1 for size in char_ngram_sizes) + 1
-        '''
+        if REDUCE_TO_WORD_LEVEL:
+            self.max_num_charngrams = len(compute_ngrams(''.join(['a'] * self.params['max_segment_char_len']), *char_ngram_sizes))
+        else:
+            self.max_num_charngrams = len(compute_ngrams(''.join(['a'] * max_domain_len), *char_ngram_sizes))
+
         self.compute_class_weights()
 
     def compute_class_weights(self):
@@ -124,14 +135,24 @@ class FastTextBasedClassifier:
         while start_index < len(domains):
             for i in range(start_index, min(len(domains), start_index + batch_size)):
                 ''' get char n-gram indices '''
-                embeds = []  # [[[1,2,5,0,0], [35,3,7,8,4]], ...]
-                for word in domains[i]['segmented_domain']:
+                embeds = []  # [[1,2,5,0,0], [35,3,7,8,4], ...] or [1,2,5,35,3,7,8,4, ...]
+                if REDUCE_TO_WORD_LEVEL:
+                    for word in domains[i]['segmented_domain']:
+                        if FT_INITIAL:
+                            embeds.append([self.charngram2index[ngram]
+                                 for ngram in compute_ngrams(word, *char_ngram_sizes)
+                                 if ngram in en_model])
+                        else:
+                            embeds.append([self.charngram2index[ngram]
+                                for ngram in compute_ngrams(word, *char_ngram_sizes)])
+                else:
                     if FT_INITIAL:
-                        embeds.append(
-                            [self.charngram2index[ngram] for ngram in compute_ngrams(word, *char_ngram_sizes)
-                             if ngram in en_model])
+                        embeds = [self.charngram2index[ngram]
+                                  for ngram in compute_ngrams(domains[i]['domain'])
+                                  if ngram in en_model]
                     else:
-                        embeds.append([self.charngram2index[ngram] for ngram in compute_ngrams(word, *char_ngram_sizes)])
+                        embeds = [self.charngram2index[ngram]
+                                  for ngram in compute_ngrams(domains[i]['domain'])]
 
                 if not embeds or not any(embeds):
                     continue
@@ -139,9 +160,13 @@ class FastTextBasedClassifier:
 
                 ''' padding '''
                 # pad char-ngram level
-                embeds = [indices + [0] * (self.max_num_charngrams - len(indices)) for indices in embeds]
-                embeds += [[0] * self.max_num_charngrams for _ in range(self.params['max_domain_segments_len'] - len(embeds))]
-                # X_batch_embed.append(tf.pad(embeds, paddings=[[0, n_extra_padding],[0,0]], mode="CONSTANT"))
+                if REDUCE_TO_WORD_LEVEL:
+                    embeds = [indices + [0] * (self.max_num_charngrams - len(indices)) for indices in embeds]  # pad char-ngram level
+                    embeds += [[0] * self.max_num_charngrams for _ in
+                               range(self.params['max_domain_segments_len'] - len(embeds))]  # pad segment level
+                else:
+                    embeds += [0] * (self.max_num_charngrams - len(embeds))
+
                 X_batch_embed.append(embeds)
                 ''' mask '''
                 X_batch_mask.append((np.array(embeds) != 0).astype(float))
@@ -200,10 +225,22 @@ class FastTextBasedClassifier:
 
         # INPUTs
         is_training = tf.placeholder(tf.bool, shape=(), name='bool_train')
-        x_char_ngram_indices = tf.placeholder(tf.int32,
+
+        if REDUCE_TO_WORD_LEVEL:
+            x_char_ngram_indices = tf.placeholder(tf.int32,
                                  shape=[None, self.params['max_domain_segments_len'],
                                         self.max_num_charngrams],
                                  name='embedding')
+            mask = tf.placeholder(tf.float32, shape=[None, self.params['max_domain_segments_len'],
+                                                     self.max_num_charngrams],
+                                  name='embed_mask')
+        else:
+            x_char_ngram_indices = tf.placeholder(tf.int32,
+                                                  shape=[None, self.max_num_charngrams],
+                                                  name='embedding')
+            mask = tf.placeholder(tf.float32, shape=[None, self.max_num_charngrams],
+                                  name='embed_mask')
+
 
         x_suffix = tf.placeholder(tf.float32,
                                   shape=[None, self.params['num_suffix']],
@@ -218,14 +255,15 @@ class FastTextBasedClassifier:
         # Look up embeddings for inputs.
         embeddings = tf.Variable(self.inital_ngram_embed, trainable=not FROZEN)
         embed = tf.nn.embedding_lookup(embeddings, x_char_ngram_indices)
-        mask = tf.placeholder(tf.float32, shape=[None, self.params['max_domain_segments_len'],
-                                                 self.max_num_charngrams],
-                              name='embed_mask')
         mask = tf.expand_dims(mask, axis=-1)
-        mask = tf.tile(mask, [1,1,1,embed_dimen])
-        x_embed = tf.multiply(embed, mask)  # x_embed.shape: (None, self.params['max_domain_segments_len'],
-                                                             # self.max_num_charngrams, embed_dimen)
-        x_embed = tf.reduce_mean(x_embed, 2)
+
+        if REDUCE_TO_WORD_LEVEL:
+            mask = tf.tile(mask, [1, 1, 1,embed_dimen])
+            x_embed = tf.multiply(embed, mask)
+            x_embed = tf.reduce_mean(x_embed, 2)
+        else:
+            mask = tf.tile(mask, [1, 1, embed_dimen])
+            x_embed = tf.multiply(embed, mask)
 
 
 
