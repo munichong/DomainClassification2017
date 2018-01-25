@@ -41,7 +41,7 @@ lr_rate = 0.001
 class_weighted = False
 
 
-REDUCE_TO_WORD_LEVEL = True
+REDUCE_TO_WORD_LEVEL = False
 
 FROZEN = True
 FT_INITIAL = True
@@ -57,6 +57,7 @@ print(categories)
 
 # Creating the model
 print("Loading the FastText Model")
+# en_model = {'test':[1]*embed_dimen}
 en_model = FastText.load_fasttext_format('../FastText/wiki.en/wiki.en')
 
 
@@ -76,7 +77,6 @@ class FastTextBasedClassifier:
         self.charngram2index = defaultdict(int)  # index starts from 1. 0 is for padding
         for domains in (self.domains_train, self.domains_val, self.domains_test):
             for domain in domains:
-                max_domain_len = max(max_domain_len, len(domain['domain']))
                 if REDUCE_TO_WORD_LEVEL:
                     for word in domain['segmented_domain']:
                         for ngram in compute_ngrams(word, *char_ngram_sizes):
@@ -84,26 +84,22 @@ class FastTextBasedClassifier:
                                 continue
                             self.charngram2index[ngram] = len(self.charngram2index) + 1
                 else:
-                    for ngram in compute_ngrams(domain['domain'], *char_ngram_sizes):
+                    max_domain_len = max(max_domain_len, len(domain['domain'].replace('www.', '')))
+                    for ngram in compute_ngrams(domain['domain'].replace('www.', ''), *char_ngram_sizes):
                         if ngram in self.charngram2index:
                             continue
                         self.charngram2index[ngram] = len(self.charngram2index) + 1
 
+
         self.inital_ngram_embed = np.random.uniform(low=-1.0, high=1.0, size=(max(self.charngram2index.values()) + 1, embed_dimen)).astype('float32')
         if FT_INITIAL:
             for ngram, index in self.charngram2index.items():
-                '''
-                if ngram not in en_model:
-                    # if FROZEN:
-                        # self.inital_ngram_embed[index, :] = np.zeros(shape=embed_dimen, dtype='float32')
-                    continue
-                else:
-                    self.inital_ngram_embed[index,:] = en_model[ngram]
-                '''
                 if ngram in en_model.wv.vocab:
                     self.inital_ngram_embed[index, :] = super(FastTextKeyedVectors, en_model.wv).word_vec(ngram, False)
                 elif ngram in en_model.wv.ngrams:
                     self.inital_ngram_embed[index, :] = en_model.wv.syn0_ngrams[en_model.wv.ngrams[ngram]]
+
+        print('self.inital_ngram_embed.shape =', self.inital_ngram_embed.shape)
 
         ''' load params '''
         self.params = json.load(open(OUTPUT_DIR + 'params_%s.json' % DATASET))
@@ -112,6 +108,7 @@ class FastTextBasedClassifier:
             self.max_num_charngrams = len(compute_ngrams(''.join(['a'] * self.params['max_segment_char_len']), *char_ngram_sizes))
         else:
             self.max_num_charngrams = len(compute_ngrams(''.join(['a'] * max_domain_len), *char_ngram_sizes))
+        print('self.max_num_charngrams =', self.max_num_charngrams)
 
         self.compute_class_weights()
 
@@ -152,11 +149,11 @@ class FastTextBasedClassifier:
                 else:
                     if FT_INITIAL:
                         embeds = [self.charngram2index[ngram]
-                                  for ngram in compute_ngrams(domains[i]['domain'])
+                                  for ngram in compute_ngrams(domains[i]['domain'], *char_ngram_sizes)
                                   if ngram in self.charngram2index]
                     else:
                         embeds = [self.charngram2index[ngram]
-                                  for ngram in compute_ngrams(domains[i]['domain'])]
+                                  for ngram in compute_ngrams(domains[i]['domain'], *char_ngram_sizes)]
 
                 if not embeds or not any(embeds):
                     domains[i]['skipped'] = True
