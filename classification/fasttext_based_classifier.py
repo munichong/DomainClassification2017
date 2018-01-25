@@ -14,7 +14,7 @@ from datetime import datetime
 import warnings
 warnings.filterwarnings(action='ignore', category=UserWarning, module='gensim')
 from gensim.models.wrappers import FastText
-from gensim.models.wrappers.fasttext import compute_ngrams
+from gensim.models.wrappers.fasttext import compute_ngrams, FastTextKeyedVectors
 
 DATASET = 'content'  # 'content' or '2340768'
 
@@ -35,7 +35,7 @@ act_fn = tf.nn.relu
 
 n_epochs = 80
 batch_size = 1000
-lr_rate = 0.0005
+lr_rate = 0.001
 
 
 class_weighted = False
@@ -92,14 +92,18 @@ class FastTextBasedClassifier:
         self.inital_ngram_embed = np.random.uniform(low=-1.0, high=1.0, size=(max(self.charngram2index.values()) + 1, embed_dimen)).astype('float32')
         if FT_INITIAL:
             for ngram, index in self.charngram2index.items():
+                '''
                 if ngram not in en_model:
                     # if FROZEN:
                         # self.inital_ngram_embed[index, :] = np.zeros(shape=embed_dimen, dtype='float32')
                     continue
                 else:
                     self.inital_ngram_embed[index,:] = en_model[ngram]
-
-
+                '''
+                if ngram in en_model.wv.vocab:
+                    self.inital_ngram_embed[index, :] = super(FastTextKeyedVectors, en_model.wv).word_vec(ngram, False)
+                elif ngram in en_model.wv.ngrams:
+                    self.inital_ngram_embed[index, :] = en_model.wv.syn0_ngrams[en_model.wv.ngrams[ngram]]
 
         ''' load params '''
         self.params = json.load(open(OUTPUT_DIR + 'params_%s.json' % DATASET))
@@ -141,7 +145,7 @@ class FastTextBasedClassifier:
                         if FT_INITIAL:
                             embeds.append([self.charngram2index[ngram]
                                  for ngram in compute_ngrams(word, *char_ngram_sizes)
-                                 if ngram in en_model])
+                                 if ngram in self.charngram2index])
                         else:
                             embeds.append([self.charngram2index[ngram]
                                 for ngram in compute_ngrams(word, *char_ngram_sizes)])
@@ -149,13 +153,15 @@ class FastTextBasedClassifier:
                     if FT_INITIAL:
                         embeds = [self.charngram2index[ngram]
                                   for ngram in compute_ngrams(domains[i]['domain'])
-                                  if ngram in en_model]
+                                  if ngram in self.charngram2index]
                     else:
                         embeds = [self.charngram2index[ngram]
                                   for ngram in compute_ngrams(domains[i]['domain'])]
 
                 if not embeds or not any(embeds):
+                    domains[i]['skipped'] = True
                     continue
+                domains[i]['skipped'] = False
                 domain_actual_lens.append(len(embeds))
 
                 ''' padding '''
@@ -382,7 +388,9 @@ class FastTextBasedClassifier:
                 print()
                 print("Macro average:")
                 precisions_macro, recalls_macro, fscores_macro, _ = precision_recall_fscore_support(
-                                              [category2index[domain['categories'][1]] for domain in self.domains_test],
+                                              [category2index[domain['categories'][1]]
+                                               for domain in self.domains_test
+                                               if not domain['skipped']],
                                                pred_test, average='macro')
                 print("Precision (macro): %.4f, Recall (macro): %.4f, F-score (macro): %.4f" %
                       (precisions_macro, recalls_macro, fscores_macro))
@@ -394,7 +402,9 @@ class FastTextBasedClassifier:
                     # the accuracy of this epoch is the largest
                     print("Classification Performance on individual classes:")
                     precisions_none, recalls_none, fscores_none, supports_none = precision_recall_fscore_support(
-                        [category2index[domain['categories'][1]] for domain in self.domains_test],
+                        [category2index[domain['categories'][1]]
+                         for domain in self.domains_test
+                         if not domain['skipped']],
                         pred_test, average=None)
                     print(tabulate(zip((categories[i] for i in range(len(precisions_none))),
                                        precisions_none, recalls_none, fscores_none, supports_none),
