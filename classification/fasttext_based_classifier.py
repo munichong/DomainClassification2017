@@ -73,23 +73,23 @@ class FastTextBasedClassifier:
         self.domains_test = pickle.load(open(OUTPUT_DIR + 'test_domains_%s.list' % DATASET, 'rb'))
         self.domains_test = [d for cat_domains in self.domains_test for d in cat_domains]
 
-        max_domain_len = 0
+
         self.charngram2index = defaultdict(int)  # index starts from 1. 0 is for padding
+        max_domain_ngram = 0
+        max_segment_ngram = 0
         for domains in (self.domains_train, self.domains_val, self.domains_test):
+            n_ngram_d = 0
             for domain in domains:
-                if REDUCE_TO_WORD_LEVEL:
-                    for word in domain['segmented_domain']:
-                        for ngram in compute_ngrams(word, *char_ngram_sizes):
-                            if ngram in self.charngram2index:
-                                continue
-                            self.charngram2index[ngram] = len(self.charngram2index) + 1
-                else:
-                    max_domain_len = max(max_domain_len, len(domain['domain'].replace('www.', '')))
-                    for ngram in compute_ngrams(domain['domain'].replace('www.', ''), *char_ngram_sizes):
+                n_ngram_s = 0
+                for word in domain['segmented_domain']:
+                    for ngram in compute_ngrams(word, *char_ngram_sizes):
+                        n_ngram_d += 1
+                        n_ngram_s += 1
                         if ngram in self.charngram2index:
                             continue
                         self.charngram2index[ngram] = len(self.charngram2index) + 1
-
+                max_segment_ngram = max(max_segment_ngram, n_ngram_s)
+            max_domain_ngram = max(max_domain_ngram, n_ngram_d)
 
         self.inital_ngram_embed = np.random.uniform(low=-1.0, high=1.0, size=(max(self.charngram2index.values()) + 1, embed_dimen)).astype('float32')
         if FT_INITIAL:
@@ -105,9 +105,9 @@ class FastTextBasedClassifier:
         self.params = json.load(open(OUTPUT_DIR + 'params_%s.json' % DATASET))
         # the word itself is also added, thus: sum(...) + 1
         if REDUCE_TO_WORD_LEVEL:
-            self.max_num_charngrams = len(compute_ngrams(''.join(['a'] * self.params['max_segment_char_len']), *char_ngram_sizes))
+            self.max_num_charngrams = max_segment_ngram
         else:
-            self.max_num_charngrams = len(compute_ngrams(''.join(['a'] * max_domain_len), *char_ngram_sizes))
+            self.max_num_charngrams = max_domain_ngram
         print('self.max_num_charngrams =', self.max_num_charngrams)
 
         self.compute_class_weights()
@@ -147,13 +147,15 @@ class FastTextBasedClassifier:
                             embeds.append([self.charngram2index[ngram]
                                 for ngram in compute_ngrams(word, *char_ngram_sizes)])
                 else:
-                    if FT_INITIAL:
-                        embeds = [self.charngram2index[ngram]
-                                  for ngram in compute_ngrams(domains[i]['domain'], *char_ngram_sizes)
-                                  if ngram in self.charngram2index]
-                    else:
-                        embeds = [self.charngram2index[ngram]
-                                  for ngram in compute_ngrams(domains[i]['domain'], *char_ngram_sizes)]
+                    for word in domains[i]['segmented_domain']:
+                        if FT_INITIAL:
+                            embeds.extend([self.charngram2index[ngram]
+                                           for ngram in compute_ngrams(word, *char_ngram_sizes)
+                                           if ngram in self.charngram2index])
+                        else:
+                            embeds.extend([self.charngram2index[ngram]
+                                           for ngram in compute_ngrams(word, *char_ngram_sizes)])
+
 
                 if not embeds or not any(embeds):
                     domains[i]['skipped'] = True
