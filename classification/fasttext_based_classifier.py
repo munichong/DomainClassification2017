@@ -78,18 +78,18 @@ class FastTextBasedClassifier:
         max_domain_ngram = 0
         max_segment_ngram = 0
         for domains in (self.domains_train, self.domains_val, self.domains_test):
-            n_ngram_d = 0
             for domain in domains:
-                n_ngram_s = 0
+                n_ngram_d = 0
                 for word in domain['segmented_domain']:
+                    n_ngram_s = 0
                     for ngram in compute_ngrams(word, *char_ngram_sizes):
                         n_ngram_d += 1
                         n_ngram_s += 1
                         if ngram in self.charngram2index:
                             continue
                         self.charngram2index[ngram] = len(self.charngram2index) + 1
-                max_segment_ngram = max(max_segment_ngram, n_ngram_s)
-            max_domain_ngram = max(max_domain_ngram, n_ngram_d)
+                    max_segment_ngram = max(max_segment_ngram, n_ngram_s)
+                max_domain_ngram = max(max_domain_ngram, n_ngram_d)
 
         self.inital_ngram_embed = np.random.uniform(low=-1.0, high=1.0, size=(max(self.charngram2index.values()) + 1, embed_dimen)).astype('float32')
         if FT_INITIAL:
@@ -306,7 +306,7 @@ class FastTextBasedClassifier:
 
 
         # concatenate suffix one-hot and the abstract representation of the domains segments
-        # The shape of cat_layer should be [batch_size, n_lstm_neurons+self.params['num_suffix']]
+        # The shape of cat_layer should be [batch_size, width_domain_vectors + self.params['num_suffix']]
         cat_layer = tf.concat(domain_vectors + [x_suffix], -1)
         # print(cat_layer.get_shape())
 
