@@ -12,7 +12,8 @@ from gensim.models.wrappers.fasttext import compute_ngrams, FastTextKeyedVectors
 
 
 
-print(sorted(compute_ngrams("word", 4, 5)))
+print(sorted(compute_ngrams("www", 3, 6)))
+print(sorted(compute_ngrams("npr", 3, 6)))
 a = []
 word = 'aaaaaa'
 word = ''.join(['<', word, '>'])

@@ -3,7 +3,7 @@ Created on Oct 30, 2017
 
 @author: munichong
 '''
-import numpy as np, pickle, json, csv, os
+import numpy as np, pickle, json, csv, os, sys
 import tensorflow as tf
 from pprint import pprint
 from random import shuffle
@@ -24,7 +24,7 @@ type = 'CNN'
 # For RNN
 n_rnn_neurons = 300
 # For CNN
-filter_sizes = [2,1]
+filter_sizes = [2, 1]
 num_filters = 512
 
 embed_dimen = 300
@@ -34,7 +34,7 @@ n_fc_layers= 3
 act_fn = tf.nn.relu
 
 n_epochs = 80
-batch_size = 1000
+batch_size = 2000
 lr_rate = 0.001
 
 
@@ -121,7 +121,8 @@ class FastTextBasedClassifier:
         # self.class_weights['Health'] = 1
         # self.class_weights['Business'] = 0.8
         # self.class_weights['Arts'] = 0.8
-        pprint(self.class_weights)
+        if class_weighted:
+            pprint(self.class_weights)
 
 
     def next_batch(self, domains, batch_size=batch_size):
@@ -155,7 +156,6 @@ class FastTextBasedClassifier:
                         else:
                             embeds.extend([self.charngram2index[ngram]
                                            for ngram in compute_ngrams(word, *char_ngram_sizes)])
-
 
                 if not embeds or not any(embeds):
                     domains[i]['skipped'] = True
@@ -269,6 +269,7 @@ class FastTextBasedClassifier:
         else:
             mask = tf.tile(mask, [1, 1, embed_dimen])
             x_embed = tf.multiply(embed, mask)
+            # x_embed = embed
 
 
 
@@ -293,16 +294,27 @@ class FastTextBasedClassifier:
                 conv = tf.nn.conv2d(x_embed_expanded, W_filter, strides=[1, 1, 1, 1], padding="VALID")
                 # Apply nonlinearity
                 h = tf.nn.relu(tf.nn.bias_add(conv, b_filter), name="relu")
-                pooled = tf.nn.max_pool(h, ksize=[1, self.params['max_domain_segments_len'] - filter_size + 1, 1, 1],
-                                        strides=[1, 1, 1, 1], padding='VALID')
+                if REDUCE_TO_WORD_LEVEL:
+                    pooled = tf.nn.max_pool(h, ksize=[1, self.params['max_domain_segments_len'] - filter_size + 1, 1, 1],
+                                            strides=[1, 1, 1, 1], padding='VALID')
+                else:
+                    pooled = tf.nn.max_pool(h, ksize=[1, self.max_num_charngrams - filter_size + 1, 1, 1],
+                                            strides=[1, 1, 1, 1], padding='VALID')
                 pooled_outputs.append(pooled)
             # Combine all the pooled features
             h_pool = tf.concat(pooled_outputs, axis=3)
             num_filters_total = num_filters * len(filter_sizes)
             domain_vec_cnn = tf.reshape(h_pool, [-1, num_filters_total])
             domain_vec_cnn = tf.layers.dropout(domain_vec_cnn, dropout_rate, training=is_training)
-            domain_vectors.append(domain_vec_cnn)
 
+
+            if not REDUCE_TO_WORD_LEVEL:
+                domain_vec_cnn = tf.nn.l2_normalize(domain_vec_cnn, dim=-1)
+                # domain_vectors = tf.contrib.layers.batch_norm(domain_vectors,
+                #                               center=True, scale=True,
+                #                               is_training=is_training,
+                #                               scope='bn')
+            domain_vectors.append(domain_vec_cnn)
 
 
         # concatenate suffix one-hot and the abstract representation of the domains segments
@@ -352,7 +364,7 @@ class FastTextBasedClassifier:
                 # model training
                 n_batch = 0
                 for X_batch_embed, X_batch_mask, domain_actual_lens, X_batch_suf, sample_weights, y_batch in self.next_batch(self.domains_train):
-                    _, acc_batch_train, loss_batch_train, prediction_train = sess.run([training_op, accuracy, loss_mean, prediction],
+                    _, acc_batch_train, loss_batch_train, prediction_train, debug_vec = sess.run([training_op, accuracy, loss_mean, prediction, domain_vectors],
                                                                     feed_dict={
                                                                                'bool_train:0': True,
                                                                                'embedding:0': X_batch_embed,
@@ -361,6 +373,9 @@ class FastTextBasedClassifier:
                                                                                'length:0': domain_actual_lens,
                                                                                'weight:0': sample_weights,
                                                                                'target:0': y_batch})
+                    # print(debug_vec)
+                    # if n_batch == 100:
+                    #     sys.exit(0)
 
                     n_batch += 1
                     if epoch < 2:
