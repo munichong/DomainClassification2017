@@ -18,7 +18,7 @@ OUTPUT_DIR = '../Output/'
 
 class BaselineClassifier:
 
-    ns = [4, 5, 6]
+    ns = [4, 5, 6, 7, 8]
 
     def building_vector(self, features):
         vector = defaultdict(int)
@@ -27,23 +27,24 @@ class BaselineClassifier:
         return vector
 
     def features(self, url):
+        # print()
+        # print(url)
 
         """ Feature 1: tokens """
         tokens_list = self.tokens(url)
-#         print tokens_list
+        # print(tokens_list)
 
         """ Feature 2: n-grams from tokens"""
-#         print self.ngram_tokens(["watchers", "info"]) # TEST
         ngram_tokens_list = self.ngram_tokens(tokens_list)
-#         print ngram_tokens_list
+        # print(ngram_tokens_list)
 
         """ Feature 3: n-grams from URL """
-#         print self.ngram_url(["news", "com"]) # TEST
         ngram_url_list = self.ngram_url(tokens_list)
-#         print ngram_url_list
+        # print(ngram_url_list)
 
         """ Feature 4: encoding positional information """
         pos_info_list = self.positional_info(tokens_list, ngram_tokens_list)
+        # print(pos_info_list)
 
 #         return self.building_vector( tokens_list + ngram_tokens_list +
 #                                 ngram_url_list )
@@ -99,7 +100,7 @@ class BaselineClassifier:
         shuffle(training_domains)
         for domain in training_domains:
             if token == 'char-ngram':
-                X_train.append(' '.join(self.features(domain['raw_domain'])))
+                X_train.append(' '.join(self.features('.'.join([domain['domain'], domain['suffix']]))))
             elif token == 'word':
                 X_train.append(' '.join(domain['segmented_domain']))
             y_train.append(domain['target'])
@@ -117,7 +118,7 @@ class BaselineClassifier:
         val_domains = [d for cat_domains in val_domains for d in cat_domains]
         for domain in val_domains:
             if token == 'char-ngram':
-                X_val.append(' '.join(self.features(domain['raw_domain'])))
+                X_val.append(' '.join(self.features('.'.join([domain['domain'], domain['suffix']]))))
             elif token == 'word':
                 X_val.append(' '.join(domain['segmented_domain']))
             y_val.append(domain['target'])
@@ -135,7 +136,7 @@ class BaselineClassifier:
         test_domains = [d for cat_domains in test_domains for d in cat_domains]
         for domain in test_domains:
             if token == 'char-ngram':
-                X_test.append(' '.join(self.features(domain['raw_domain'])))
+                X_test.append(' '.join(self.features('.'.join([domain['domain'], domain['suffix']]))))
             elif token == 'word':
                 X_test.append(' '.join(domain['segmented_domain']))
             y_test.append(domain['target'])

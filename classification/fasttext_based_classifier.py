@@ -24,7 +24,7 @@ type = 'CNN'
 # For RNN
 n_rnn_neurons = 300
 # For CNN
-filter_sizes = [2, 1]
+filter_sizes = [1]
 num_filters = 512
 
 embed_dimen = 300
@@ -33,7 +33,7 @@ dropout_rate= 0.2
 n_fc_layers= 3
 act_fn = tf.nn.relu
 
-n_epochs = 80
+n_epochs = 100
 batch_size = 2000
 lr_rate = 0.001
 
@@ -308,12 +308,12 @@ class FastTextBasedClassifier:
             domain_vec_cnn = tf.layers.dropout(domain_vec_cnn, dropout_rate, training=is_training)
 
 
-            if not REDUCE_TO_WORD_LEVEL:
-                domain_vec_cnn = tf.nn.l2_normalize(domain_vec_cnn, dim=-1)
-                # domain_vectors = tf.contrib.layers.batch_norm(domain_vectors,
-                #                               center=True, scale=True,
-                #                               is_training=is_training,
-                #                               scope='bn')
+            domain_vec_cnn = tf.nn.l2_normalize(domain_vec_cnn, dim=-1)
+            # batch normalization leads to bad performance
+            # domain_vec_cnn = tf.contrib.layers.batch_norm(domain_vec_cnn,
+            #                                   center=True, scale=True,
+            #                                   is_training=is_training,
+            #                                   scope='bn')
             domain_vectors.append(domain_vec_cnn)
 
 
