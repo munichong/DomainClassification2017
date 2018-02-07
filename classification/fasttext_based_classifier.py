@@ -24,7 +24,7 @@ type = 'CNN'
 # For RNN
 n_rnn_neurons = 300
 # For CNN
-filter_sizes = [1]
+filter_sizes = [2, 1]
 num_filters = 512
 
 embed_dimen = 300
@@ -42,6 +42,11 @@ class_weighted = False
 
 
 REDUCE_TO_WORD_LEVEL = False
+
+if REDUCE_TO_WORD_LEVEL:
+    filter_sizes = [2, 1]
+else:
+    filter_sizes = [1]
 
 FROZEN = True
 FT_INITIAL = True
