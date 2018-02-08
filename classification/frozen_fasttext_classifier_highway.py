@@ -88,8 +88,8 @@ class PretrainFastTextClassifier:
             for i in range(start_index, min(len(domains), start_index + batch_size)):
                 # skip if a segment is not in en_model
                 embeds = [en_model[w].tolist() for w in domains[i]['segmented_domain'] if w in en_model]
-                if not embeds: # Skip if none of segments of this domain can not be recognized by FastText
-                    continue
+                # if not embeds: # Skip if none of segments of this domain can not be recognized by FastText
+                #     continue
                 domain_actual_lens.append(len(embeds))
                 n_extra_padding = self.params['max_domain_segments_len'] - len(embeds)
                 embeds += [[0] * embed_dimen for _ in range(n_extra_padding)]
@@ -206,29 +206,38 @@ class PretrainFastTextClassifier:
 
         # concatenate suffix one-hot and the abstract representation of the domains segments
         # The shape of cat_layer should be [batch_size, n_cnn_neurons + self.params['num_suffix']]
-        cat_layer = tf.concat(domain_vectors + [x_suffix], -1)
+        logits = tf.concat(domain_vectors + [x_suffix], -1)
         # print(cat_layer.get_shape())
 
-        def highway(x, size, activation, carry_bias=-1.0):
-            W_T = tf.Variable(tf.truncated_normal(size, stddev=0.1), name="weight_transform")
-            b_T = tf.Variable(tf.constant(carry_bias, shape=[size[1]]), name="bias_transform")
+        size = logits.get_shape().as_list()[-1]
 
-            W = tf.Variable(tf.truncated_normal(size, stddev=0.1), name="weight")
-            b = tf.Variable(tf.constant(0.1, shape=[size[1]]), name="bias")
 
-            T = tf.sigmoid(tf.matmul(x, W_T) + b_T, name="transform_gate")
-            H = activation(tf.matmul(x, W) + b, name="activation")
-            C = tf.subtract(1.0, T, name="carry_gate")
+        W_T = tf.Variable(tf.truncated_normal([n_rnn_neurons, n_rnn_neurons], stddev=0.1), name="weight_transform")
+        b_T = tf.Variable(tf.constant(1.0, shape=[n_rnn_neurons]), name="bias_transform")
 
-            y = tf.add(tf.multiply(H, T), tf.multiply(x, C), "y")
-            return y
-
+        # W = tf.Variable(tf.truncated_normal([size, size], stddev=0.1), name="weight")
+        # b = tf.Variable(tf.constant(0.1, shape=[size]), name="bias")
+        print(logits.get_shape())
         for _ in range(n_fc_layers):
-            '''
-            logits = tf.contrib.layers.fully_connected(cat_layer, num_outputs=n_rnn_neurons, activation_fn=act_fn)
-            '''
-            logits = highway(cat_layer, cat_layer.get_shape(), act_fn)
+            logits = tf.contrib.layers.fully_connected(logits, num_outputs=n_rnn_neurons, activation_fn=act_fn)
             logits = tf.layers.dropout(logits, dropout_rate, training=is_training)
+
+        print(logits.get_shape())
+        print(W_T.get_shape())
+        T = tf.sigmoid(tf.matmul(logits, W_T) + b_T, name="transform_gate")
+        C = tf.subtract(1.0, T, name="carry_gate")
+
+        logits = tf.add(tf.multiply(logits, T), tf.multiply(logits, C), "y")
+
+
+
+
+        # for _ in range(n_fc_layers):
+        #     '''
+        #     logits = tf.contrib.layers.fully_connected(cat_layer, num_outputs=n_rnn_neurons, activation_fn=act_fn)
+        #     '''
+        #     logits = highway(cat_layer, cat_layer.get_shape().as_list()[-1], act_fn)
+        #     logits = tf.layers.dropout(logits, dropout_rate, training=is_training)
 
         logits = tf.contrib.layers.fully_connected(logits, self.params['num_targets'], activation_fn=act_fn)
 

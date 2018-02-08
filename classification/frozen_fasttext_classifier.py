@@ -29,7 +29,7 @@ dropout_rate= 0.2
 n_fc_layers= 3
 act_fn = tf.nn.relu
 
-n_epochs = 60
+n_epochs = 80
 batch_size = 4000
 lr_rate = 0.001
 
@@ -209,8 +209,9 @@ class PretrainFastTextClassifier:
         cat_layer = tf.concat(domain_vectors + [x_suffix], -1)
         # print(cat_layer.get_shape())
 
+        logits = cat_layer
         for _ in range(n_fc_layers):
-            logits = tf.contrib.layers.fully_connected(cat_layer, num_outputs=n_rnn_neurons, activation_fn=act_fn)
+            logits = tf.contrib.layers.fully_connected(logits, num_outputs=n_rnn_neurons, activation_fn=act_fn)
             logits = tf.layers.dropout(logits, dropout_rate, training=is_training)
 
         logits = tf.contrib.layers.fully_connected(logits, self.params['num_targets'], activation_fn=act_fn)

@@ -25,7 +25,7 @@ type = 'CNN'
 n_rnn_neurons = 300
 # For CNN
 filter_sizes_word = [2, 1]
-filter_sizes_char = [2, 1]
+filter_sizes_char = [1]
 num_filters = 512
 
 embed_dimen = 300
@@ -336,9 +336,12 @@ class FastTextBasedClassifier:
             h_pool = tf.concat(pooled_outputs, axis=3)
             num_filters_total = num_filters * len(filter_sizes_word)
             domain_vec_cnn_word = tf.reshape(h_pool, [-1, num_filters_total])
-            domain_vec_cnn_word = tf.layers.dropout(domain_vec_cnn_word, dropout_rate, training=is_training)
 
             domain_vec_cnn_word = tf.nn.l2_normalize(domain_vec_cnn_word, dim=-1)
+
+            domain_vec_cnn_word = tf.layers.dropout(domain_vec_cnn_word, dropout_rate, training=is_training)
+
+
 
             domain_vectors.append(domain_vec_cnn_word)
 
@@ -348,9 +351,9 @@ class FastTextBasedClassifier:
         cat_layer = tf.concat(domain_vectors + [x_suffix], -1)
         # print(cat_layer.get_shape())
 
-        logits = None
+        logits = cat_layer
         for _ in range(n_fc_layers):
-            logits = tf.contrib.layers.fully_connected(cat_layer, num_outputs=n_rnn_neurons, activation_fn=act_fn)
+            logits = tf.contrib.layers.fully_connected(logits, num_outputs=n_rnn_neurons, activation_fn=act_fn)
             logits = tf.layers.dropout(logits, dropout_rate, training=is_training)
 
         logits = tf.contrib.layers.fully_connected(logits, self.params['num_targets'], activation_fn=act_fn)

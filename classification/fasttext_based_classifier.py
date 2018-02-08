@@ -327,9 +327,9 @@ class FastTextBasedClassifier:
         cat_layer = tf.concat(domain_vectors + [x_suffix], -1)
         # print(cat_layer.get_shape())
 
-        logits = None
+        logits = cat_layer
         for _ in range(n_fc_layers):
-            logits = tf.contrib.layers.fully_connected(cat_layer, num_outputs=n_rnn_neurons, activation_fn=act_fn)
+            logits = tf.contrib.layers.fully_connected(logits, num_outputs=n_rnn_neurons, activation_fn=act_fn)
             logits = tf.layers.dropout(logits, dropout_rate, training=is_training)
 
         logits = tf.contrib.layers.fully_connected(logits, self.params['num_targets'], activation_fn=act_fn)
