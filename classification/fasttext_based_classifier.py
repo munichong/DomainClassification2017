@@ -310,15 +310,12 @@ class FastTextBasedClassifier:
             h_pool = tf.concat(pooled_outputs, axis=3)
             num_filters_total = num_filters * len(filter_sizes)
             domain_vec_cnn = tf.reshape(h_pool, [-1, num_filters_total])
+
+            domain_vec_cnn = tf.nn.l2_normalize(domain_vec_cnn, dim=-1)
+
             domain_vec_cnn = tf.layers.dropout(domain_vec_cnn, dropout_rate, training=is_training)
 
 
-            domain_vec_cnn = tf.nn.l2_normalize(domain_vec_cnn, dim=-1)
-            # batch normalization leads to bad performance
-            # domain_vec_cnn = tf.contrib.layers.batch_norm(domain_vec_cnn,
-            #                                   center=True, scale=True,
-            #                                   is_training=is_training,
-            #                                   scope='bn')
             domain_vectors.append(domain_vec_cnn)
 
 
