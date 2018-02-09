@@ -34,7 +34,7 @@ dropout_rate= 0.2
 n_fc_layers= 3
 act_fn = tf.nn.relu
 
-n_epochs = 100
+n_epochs = 40
 batch_size = 2000
 lr_rate = 0.001
 
@@ -170,8 +170,8 @@ class FastTextBasedClassifier:
 
                 ''' get and pad word embedding indices '''
                 word_embeds = [en_model[w].tolist() for w in domains[i]['segmented_domain'] if w in en_model]
-                if not word_embeds:  # Skip if none of segments of this domain can not be recognized by FastText
-                    continue
+                # if not word_embeds:  # Skip if none of segments of this domain can not be recognized by FastText
+                    # continue
                 n_extra_padding = self.params['max_domain_segments_len'] - len(word_embeds)
                 word_embeds += [[0] * embed_dimen for _ in range(n_extra_padding)]
                 # X_batch_embed.append(tf.pad(embeds, paddings=[[0, n_extra_padding],[0,0]], mode="CONSTANT"))
@@ -306,9 +306,11 @@ class FastTextBasedClassifier:
             h_pool = tf.concat(pooled_outputs, axis=3)
             num_filters_total = num_filters * len(filter_sizes_char)
             domain_vec_cnn_char = tf.reshape(h_pool, [-1, num_filters_total])
-            domain_vec_cnn_char = tf.layers.dropout(domain_vec_cnn_char, dropout_rate, training=is_training)
 
             domain_vec_cnn_char = tf.nn.l2_normalize(domain_vec_cnn_char, dim=-1)
+
+            domain_vec_cnn_char = tf.layers.dropout(domain_vec_cnn_char, dropout_rate, training=is_training)
+
 
             domain_vectors.append(domain_vec_cnn_char)
 
@@ -337,7 +339,7 @@ class FastTextBasedClassifier:
             num_filters_total = num_filters * len(filter_sizes_word)
             domain_vec_cnn_word = tf.reshape(h_pool, [-1, num_filters_total])
 
-            domain_vec_cnn_word = tf.nn.l2_normalize(domain_vec_cnn_word, dim=-1)
+            # domain_vec_cnn_word = tf.nn.l2_normalize(domain_vec_cnn_word, dim=-1)
 
             domain_vec_cnn_word = tf.layers.dropout(domain_vec_cnn_word, dropout_rate, training=is_training)
 

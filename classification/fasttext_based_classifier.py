@@ -311,7 +311,8 @@ class FastTextBasedClassifier:
             num_filters_total = num_filters * len(filter_sizes)
             domain_vec_cnn = tf.reshape(h_pool, [-1, num_filters_total])
 
-            domain_vec_cnn = tf.nn.l2_normalize(domain_vec_cnn, dim=-1)
+            if not REDUCE_TO_WORD_LEVEL:
+                domain_vec_cnn = tf.nn.l2_normalize(domain_vec_cnn, dim=-1)
 
             domain_vec_cnn = tf.layers.dropout(domain_vec_cnn, dropout_rate, training=is_training)
 

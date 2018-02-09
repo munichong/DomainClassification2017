@@ -11,7 +11,7 @@ from gensim.models.wrappers import FastText
 from gensim.models.wrappers.fasttext import compute_ngrams, FastTextKeyedVectors
 
 
-
+'''
 print(sorted(compute_ngrams("www", 3, 6)))
 print(sorted(compute_ngrams("npr", 3, 6)))
 a = []
@@ -21,7 +21,7 @@ for size in [4, 5]:
     for i in range(max(1, len(word) - size + 1)):  # some segments' lengths are less than char_ngram
         a.append(word[i : i + size])
 print(sorted(a))
-
+'''
 
 
 
