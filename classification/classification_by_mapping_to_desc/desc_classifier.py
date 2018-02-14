@@ -32,7 +32,7 @@ act_fn = tf.nn.relu
 max_required_desc_words_len = 100
 
 n_epochs = 60
-batch_size = 2000
+batch_size = 1000
 lr_rate = 0.001
 
 class_weighted = False
@@ -49,7 +49,7 @@ print(categories)
 # Creating the model
 print("Loading the FastText Model")
 # en_model = {"test":np.array([0]*300)}
-en_model = FastText.load_fasttext_format('../FastText/wiki.en/wiki.en')
+en_model = FastText.load_fasttext_format('../../FastText/wiki.en/wiki.en')
 
 
 class PretrainFastTextClassifier:
@@ -132,7 +132,7 @@ class PretrainFastTextClassifier:
             total_correct += batch_correct
             total_bool.extend(batch_bool)
             total_pred.extend(batch_pred)
-            logits.append(batch_logits)
+            logits.extend(batch_logits)
             n_batch += 1
         return total_loss / n_batch, total_correct / len(data), total_bool, total_pred, logits
 
@@ -145,7 +145,7 @@ class PretrainFastTextClassifier:
         # INPUTs
         is_training = tf.placeholder(tf.bool, shape=(), name='bool_train')
         x_embed = tf.placeholder(tf.float32,
-                                 shape=[None, self.params['max_domain_segments_len'], embed_dimen],
+                                 shape=[None, self.truncated_desc_words_len, embed_dimen],
                                  name='embedding')
 
         # print(x_embed.get_shape())
@@ -171,7 +171,7 @@ class PretrainFastTextClassifier:
                 conv = tf.nn.conv2d(x_embed_expanded, W_filter, strides=[1, 1, 1, 1], padding="VALID")
                 # Apply nonlinearity
                 h = tf.nn.relu(tf.nn.bias_add(conv, b_filter), name="relu")
-                pooled = tf.nn.max_pool(h, ksize=[1, self.params['max_domain_segments_len'] - filter_size + 1, 1, 1],
+                pooled = tf.nn.max_pool(h, ksize=[1, self.truncated_desc_words_len - filter_size + 1, 1, 1],
                                         strides=[1, 1, 1, 1], padding='VALID')
                 pooled_outputs.append(pooled)
             # Combine all the pooled features
@@ -202,7 +202,7 @@ class PretrainFastTextClassifier:
         training_op = optimizer.minimize(loss_mean)
 
         prediction = tf.argmax(logits_pred, axis=-1)
-        is_correct = tf.nn.in_top_k(logits, y, 1) # logits are unscaled, but here we only care the argmax
+        is_correct = tf.nn.in_top_k(logits_pred, y, 1) # logits are unscaled, but here we only care the argmax
         n_correct = tf.reduce_sum(tf.cast(is_correct, tf.float32))
         accuracy = tf.reduce_mean(tf.cast(is_correct, tf.float32))
 
@@ -294,7 +294,7 @@ class PretrainFastTextClassifier:
                     for domains, logits_vec in ((self.domains_train, logits_train),
                                                 (self.domains_val, logits_val),
                                                 (self.domains_test, logits_test)):
-                        for domain, vec in zip([domains, logits_vec]):
+                        for domain, vec in zip(domains, logits_vec):
                             domain2logits[domain['raw_domain']] = vec
                     pickle.dump(domain2logits, open('domain2logits.dict', 'wb'))
 

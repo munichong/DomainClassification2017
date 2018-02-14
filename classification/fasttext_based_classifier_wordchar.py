@@ -34,7 +34,7 @@ dropout_rate= 0.2
 n_fc_layers= 3
 act_fn = tf.nn.relu
 
-n_epochs = 40
+n_epochs = 50
 batch_size = 2000
 lr_rate = 0.001
 
@@ -307,7 +307,7 @@ class FastTextBasedClassifier:
             num_filters_total = num_filters * len(filter_sizes_char)
             domain_vec_cnn_char = tf.reshape(h_pool, [-1, num_filters_total])
 
-            domain_vec_cnn_char = tf.nn.l2_normalize(domain_vec_cnn_char, dim=-1)
+            # domain_vec_cnn_char = tf.nn.l2_normalize(domain_vec_cnn_char, dim=-1)
 
             domain_vec_cnn_char = tf.layers.dropout(domain_vec_cnn_char, dropout_rate, training=is_training)
 

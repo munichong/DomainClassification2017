@@ -29,7 +29,7 @@ dropout_rate= 0.2
 n_fc_layers= 3
 act_fn = tf.nn.relu
 
-n_epochs = 80
+n_epochs = 100
 batch_size = 4000
 lr_rate = 0.001
 
@@ -86,10 +86,14 @@ class PretrainFastTextClassifier:
         while start_index < len(domains):
             for i in range(start_index, min(len(domains), start_index + batch_size)):
                 # skip if a segment is not in en_model
+                embeds = []
                 if domains[i]['domain'] in en_model:
                     embeds = en_model[domains[i]['domain']].tolist()
+                    domains[i]['skipped'] = False
                 else: # Skip if none of segments of this domain can not be recognized by FastText
+                    domains[i]['skipped'] = True
                     continue
+
 
                 X_batch_embed.append(embeds)
 
@@ -117,7 +121,7 @@ class PretrainFastTextClassifier:
         total_bool = []
         total_pred = []
         n_batch = 0
-        for X_batch_embed, domain_actual_lens, X_batch_suf, sample_weights, y_batch in self.next_batch(data):
+        for X_batch_embed, X_batch_suf, sample_weights, y_batch in self.next_batch(data):
             batch_correct, batch_loss, batch_bool, batch_pred = session.run(eval_nodes,
                                                          feed_dict={
                                                                     'bool_train:0': False,
@@ -245,7 +249,7 @@ class PretrainFastTextClassifier:
             for epoch in range(1, n_epochs + 1):
                 # model training
                 n_batch = 0
-                for X_batch_embed, domain_actual_lens, X_batch_suf, sample_weights, y_batch in self.next_batch(self.domains_train):
+                for X_batch_embed, X_batch_suf, sample_weights, y_batch in self.next_batch(self.domains_train):
                     _, acc_batch_train, loss_batch_train, prediction_train = sess.run([training_op, accuracy, loss_mean, prediction],
                                                                     feed_dict={
                                                                                'bool_train:0': True,
@@ -284,7 +288,7 @@ class PretrainFastTextClassifier:
                 print()
                 print("Macro average:")
                 precisions_macro, recalls_macro, fscores_macro, _ = precision_recall_fscore_support(
-                                              [category2index[domain['categories'][1]] for domain in self.domains_test],
+                                              [category2index[domain['categories'][1]] for domain in self.domains_test if not domain['skipped']],
                                                pred_test, average='macro')
                 print("Precision (macro): %.4f, Recall (macro): %.4f, F-score (macro): %.4f" %
                       (precisions_macro, recalls_macro, fscores_macro))
@@ -296,7 +300,7 @@ class PretrainFastTextClassifier:
                     # the accuracy of this epoch is the largest
                     print("Classification Performance on individual classes:")
                     precisions_none, recalls_none, fscores_none, supports_none = precision_recall_fscore_support(
-                        [category2index[domain['categories'][1]] for domain in self.domains_test],
+                        [category2index[domain['categories'][1]] for domain in self.domains_test if not domain['skipped']],
                         pred_test, average=None)
                     print(tabulate(zip((categories[i] for i in range(len(precisions_none))),
                                        precisions_none, recalls_none, fscores_none, supports_none),
