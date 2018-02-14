@@ -46,13 +46,10 @@ for cate, i in category2index.items():
     categories[i] = cate
 print(categories)
 
-# Creating the model
-print("Loading the FastText Model")
-# en_model = {"test":np.array([0]*300)}
-en_model = FastText.load_fasttext_format('../../FastText/wiki.en/wiki.en')
+domain2logits = pickle.load(open('domain2logits.dict', 'rb'))
 
 
-class DescClassifier:
+class DescRepClassifier:
 
     def __init__(self):
         origin_train_domains = pickle.load(open(OUTPUT_DIR + 'training_domains_%s.list' % DATASET, 'rb'))
@@ -89,19 +86,13 @@ class DescClassifier:
             for i in range(start_index, min(len(domains), start_index + batch_size)):
                 ''' description '''
                 # skip if a segment is not in en_model
-                embeds = [en_model[w.lower()].tolist() for w in
-                          domains[i]['tokenized_desc'][ : self.truncated_desc_words_len] if w in en_model]
-
-                ''' description padding '''
-                if len(embeds) < self.truncated_desc_words_len:
-                    embeds += [[0] * embed_dimen for _ in range(self.truncated_desc_words_len - len(embeds))]
+                embeds = domain2logits[domains[i]['domain']]
 
                 X_batch_embed.append(embeds)
-                assert len(embeds) == self.truncated_desc_words_len
-
+                assert len(embeds) == n_fc_neurons
 
                 y_batch.append(domains[i]['target'])
-            yield np.array(X_batch_embed), np.array(y_batch)
+            yield np.array(X_batch_embed), np.array(X_batch_suf), np.array(y_batch)
 
             X_batch_embed.clear()
             y_batch.clear()
@@ -132,53 +123,17 @@ class DescClassifier:
 
 
     def run_graph(self):
-
-        # tf.reset_default_graph()
-
         # INPUTs
         is_training = tf.placeholder(tf.bool, shape=(), name='bool_train')
         x_embed = tf.placeholder(tf.float32,
-                                 shape=[None, self.truncated_desc_words_len, embed_dimen],
+                                 shape=[None, n_fc_neurons],
                                  name='embedding')
 
-        # print(x_embed.get_shape())
 
         y = tf.placeholder(tf.int32, shape=[None], name='target') # Each entry in y must be an index in [0, num_classes)
 
 
-        desc_vectors = []
-        if 'CNN' in type:
-            pooled_outputs = []
-            for filter_size in filter_sizes:
-                # Define and initialize filters
-                filter_shape = [filter_size, embed_dimen, 1, num_filters]
-                W_filter = tf.Variable(tf.truncated_normal(filter_shape, stddev=0.1)) # initialize the filters' weights
-                b_filter = tf.Variable(tf.constant(0.1, shape=[num_filters]))  # initialize the filters' biases
-                # The conv2d operation expects a 4-D tensor with dimensions corresponding to batch, width, height and channel.
-                # The result of our embedding doesn’t contain the channel dimension
-                # So we add it manually, leaving us with a layer of shape [None, sequence_length, embedding_size, 1].
-                x_embed_expanded = tf.expand_dims(x_embed, -1)
-                conv = tf.nn.conv2d(x_embed_expanded, W_filter, strides=[1, 1, 1, 1], padding="VALID")
-                # Apply nonlinearity
-                h = tf.nn.relu(tf.nn.bias_add(conv, b_filter), name="relu")
-                pooled = tf.nn.max_pool(h, ksize=[1, self.truncated_desc_words_len - filter_size + 1, 1, 1],
-                                        strides=[1, 1, 1, 1], padding='VALID')
-                pooled_outputs.append(pooled)
-            # Combine all the pooled features
-            h_pool = tf.concat(pooled_outputs, axis=3)
-            num_filters_total = num_filters * len(filter_sizes)
-            desc_vec_cnn = tf.reshape(h_pool, [-1, num_filters_total])
-            desc_vec_cnn = tf.layers.dropout(desc_vec_cnn, dropout_rate, training=is_training)
-            desc_vectors.append(desc_vec_cnn)
-
-
-
-        logits = desc_vectors[0]
-        for _ in range(n_fc_layers):
-            logits = tf.contrib.layers.fully_connected(logits, num_outputs=n_fc_neurons, activation_fn=act_fn)
-            logits = tf.layers.dropout(logits, dropout_rate, training=is_training)
-
-        logits_pred = tf.contrib.layers.fully_connected(logits, self.params['num_targets'], activation_fn=act_fn)
+        logits_pred = tf.contrib.layers.fully_connected(x_embed, self.params['num_targets'], activation_fn=act_fn)
 
 
         crossentropy = tf.losses.sparse_softmax_cross_entropy(labels=y, logits=logits_pred)
@@ -192,16 +147,6 @@ class DescClassifier:
         n_correct = tf.reduce_sum(tf.cast(is_correct, tf.float32))
         accuracy = tf.reduce_mean(tf.cast(is_correct, tf.float32))
 
-        '''
-        # ranking evaluation
-        ranked_res = tf.nn.top_k(logits, k=self.params['num_targets'], sorted=True).indices
-        y_2d = tf.reshape(y, (tf.shape(y)[0], 1))
-        a = tf.where(tf.equal(ranked_res, y_2d))
-        a = tf.gather_nd(a, ranked_res)
-        print(a)
-        print(a.shape)
-        rank_sum = tf.reduce_sum(a)[:, -1]
-        '''
 
         init = tf.global_variables_initializer()
 
@@ -228,7 +173,7 @@ class DescClassifier:
 
 
                 # evaluation on training data
-                eval_nodes = [n_correct, loss_mean, is_correct, prediction, logits]
+                eval_nodes = [n_correct, loss_mean, is_correct, prediction, logits_pred]
                 print()
                 print("========== Evaluation at Epoch %d ==========" % epoch)
                 loss_train, acc_train, _, _, logits_train = self.evaluate(self.domains_train, sess, eval_nodes)
@@ -269,26 +214,11 @@ class DescClassifier:
                                    headers=['category', 'precision', 'recall', 'f-score', 'support'],
                                    tablefmt='orgtbl'))
 
-
-
-                    assert len(self.domains_train) == len(logits_train) and \
-                           len(self.domains_val) == len(logits_val) and \
-                           len(self.domains_test) == len(logits_test)
-                    domain2logits = {}
-                    # store logits_train, logits_val, and logits_test to the disk
-                    for domains, logits_vec in ((self.domains_train, logits_train),
-                                                (self.domains_val, logits_val),
-                                                (self.domains_test, logits_test)):
-                        for domain, vec in zip(domains, logits_vec):
-                            domain2logits[domain['raw_domain']] = vec
-                    pickle.dump(domain2logits, open('domain2logits.dict', 'wb'))
-
-
                 test_fscore_history.append(fscores_macro)
 
 
 
 
 if __name__ == '__main__':
-    classifier = DescClassifier()
+    classifier = DescRepClassifier()
     classifier.run_graph()
