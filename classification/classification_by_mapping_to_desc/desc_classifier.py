@@ -228,7 +228,7 @@ class DescClassifier:
 
 
                 # evaluation on training data
-                eval_nodes = [n_correct, loss_mean, is_correct, prediction, logits]
+                eval_nodes = [n_correct, loss_mean, is_correct, prediction, logits_pred]
                 print()
                 print("========== Evaluation at Epoch %d ==========" % epoch)
                 loss_train, acc_train, _, _, logits_train = self.evaluate(self.domains_train, sess, eval_nodes)
@@ -255,8 +255,6 @@ class DescClassifier:
                 print("Precision (macro): %.4f, Recall (macro): %.4f, F-score (macro): %.4f" %
                       (precisions_macro, recalls_macro, fscores_macro))
                 print()
-
-
 
                 if not test_fscore_history or fscores_macro > max(test_fscore_history):
                     # the accuracy of this epoch is the largest

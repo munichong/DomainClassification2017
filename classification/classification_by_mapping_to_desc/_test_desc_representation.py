@@ -29,9 +29,9 @@ n_fc_neurons = 300
 n_fc_layers= 3
 act_fn = tf.nn.relu
 
-max_required_desc_words_len = 100
+max_required_desc_words_len = 80
 
-n_epochs = 60
+n_epochs = 10
 batch_size = 1000
 lr_rate = 0.001
 
@@ -46,7 +46,16 @@ for cate, i in category2index.items():
     categories[i] = cate
 print(categories)
 
-domain2logits = pickle.load(open('domain2logits.dict', 'rb'))
+domain2logits1 = pickle.load(open('domain2logits_logits_pred_relu.dict', 'rb'))
+# domain2logits = pickle.load(open('domain2mapping.dict', 'rb'))
+#
+# # print(list(domain2logits.items())[:3])
+# # print(domain2logits['http://massbaytrading.com/'])
+# # print(domain2logits['http://www.angelfire.com/myband/capital/'])
+# # print(domain2logits['http://www.atouchofglass.com/'])
+# # print(domain2logits['http://www.theguardian.com/film/movie/94090/etre.et.avoir'])
+#
+# print([domain2logits[d] == domain2logits1[d] for d in domain2logits])
 
 
 class DescRepClassifier:
@@ -85,14 +94,13 @@ class DescRepClassifier:
         while start_index < len(domains):
             for i in range(start_index, min(len(domains), start_index + batch_size)):
                 ''' description '''
-                # skip if a segment is not in en_model
-                embeds = domain2logits[domains[i]['domain']]
+                embeds = domain2logits[domains[i]['raw_domain']]
+                # embeds = np.random.uniform(0, 100, 13)
 
                 X_batch_embed.append(embeds)
-                assert len(embeds) == n_fc_neurons
 
                 y_batch.append(domains[i]['target'])
-            yield np.array(X_batch_embed), np.array(X_batch_suf), np.array(y_batch)
+            yield np.array(X_batch_embed), np.array(y_batch)
 
             X_batch_embed.clear()
             y_batch.clear()
@@ -126,21 +134,21 @@ class DescRepClassifier:
         # INPUTs
         is_training = tf.placeholder(tf.bool, shape=(), name='bool_train')
         x_embed = tf.placeholder(tf.float32,
-                                 shape=[None, n_fc_neurons],
+                                 shape=[None, self.params['num_targets']],
                                  name='embedding')
 
 
         y = tf.placeholder(tf.int32, shape=[None], name='target') # Each entry in y must be an index in [0, num_classes)
 
-
-        logits_pred = tf.contrib.layers.fully_connected(x_embed, self.params['num_targets'], activation_fn=act_fn)
+        logits_pred = x_embed
+        # logits_pred = tf.contrib.layers.fully_connected(x_embed, self.params['num_targets'], activation_fn=act_fn)
 
 
         crossentropy = tf.losses.sparse_softmax_cross_entropy(labels=y, logits=logits_pred)
 
         loss_mean = tf.reduce_mean(crossentropy)
         optimizer = tf.train.AdamOptimizer(learning_rate=lr_rate)
-        training_op = optimizer.minimize(loss_mean)
+        # training_op = optimizer.minimize(loss_mean)
 
         prediction = tf.argmax(logits_pred, axis=-1)
         is_correct = tf.nn.in_top_k(logits_pred, y, 1) # logits are unscaled, but here we only care the argmax
@@ -159,7 +167,7 @@ class DescRepClassifier:
                 # model training
                 n_batch = 0
                 for X_batch_embed, y_batch in self.next_batch(self.domains_train):
-                    _, acc_batch_train, loss_batch_train, prediction_train = sess.run([training_op, accuracy, loss_mean, prediction],
+                    acc_batch_train, loss_batch_train, prediction_train = sess.run([accuracy, loss_mean, prediction],
                                                                     feed_dict={
                                                                                'bool_train:0': True,
                                                                                'embedding:0': X_batch_embed,
