@@ -143,47 +143,47 @@ class DescDomainMapper:
                                  shape=[None, self.params['num_targets']],
                                  name='desc_embed')
 
+        with tf.variable_scope('domain_mapping'):
+            domain_vectors = []
+            if 'CNN' in type:
+                pooled_outputs = []
+                for filter_size in filter_sizes:
+                    # Define and initialize filters
+                    filter_shape = [filter_size, embed_dimen, 1, num_filters]
+                    W_filter = tf.Variable(tf.truncated_normal(filter_shape, stddev=0.1)) # initialize the filters' weights
+                    b_filter = tf.Variable(tf.constant(0.1, shape=[num_filters]))  # initialize the filters' biases
+                    # The conv2d operation expects a 4-D tensor with dimensions corresponding to batch, width, height and channel.
+                    # The result of our embedding doesn’t contain the channel dimension
+                    # So we add it manually, leaving us with a layer of shape [None, sequence_length, embedding_size, 1].
+                    x_embed_expanded = tf.expand_dims(x_domain, -1)
+                    conv = tf.nn.conv2d(x_embed_expanded, W_filter, strides=[1, 1, 1, 1], padding="VALID")
+                    # Apply nonlinearity
+                    h = tf.nn.relu(tf.nn.bias_add(conv, b_filter), name="relu")
+                    pooled = tf.nn.max_pool(h, ksize=[1, self.params['max_domain_segments_len'] - filter_size + 1, 1, 1],
+                                            strides=[1, 1, 1, 1], padding='VALID')
+                    pooled_outputs.append(pooled)
+                # Combine all the pooled features
+                h_pool = tf.concat(pooled_outputs, axis=3)
+                num_filters_total = num_filters * len(filter_sizes)
+                domain_vec_cnn = tf.reshape(h_pool, [-1, num_filters_total])
+                domain_vec_cnn = tf.layers.dropout(domain_vec_cnn, dropout_rate, training=is_training)
+                domain_vectors.append(domain_vec_cnn)
 
-        domain_vectors = []
-        if 'CNN' in type:
-            pooled_outputs = []
-            for filter_size in filter_sizes:
-                # Define and initialize filters
-                filter_shape = [filter_size, embed_dimen, 1, num_filters]
-                W_filter = tf.Variable(tf.truncated_normal(filter_shape, stddev=0.1)) # initialize the filters' weights
-                b_filter = tf.Variable(tf.constant(0.1, shape=[num_filters]))  # initialize the filters' biases
-                # The conv2d operation expects a 4-D tensor with dimensions corresponding to batch, width, height and channel.
-                # The result of our embedding doesn’t contain the channel dimension
-                # So we add it manually, leaving us with a layer of shape [None, sequence_length, embedding_size, 1].
-                x_embed_expanded = tf.expand_dims(x_domain, -1)
-                conv = tf.nn.conv2d(x_embed_expanded, W_filter, strides=[1, 1, 1, 1], padding="VALID")
-                # Apply nonlinearity
-                h = tf.nn.relu(tf.nn.bias_add(conv, b_filter), name="relu")
-                pooled = tf.nn.max_pool(h, ksize=[1, self.params['max_domain_segments_len'] - filter_size + 1, 1, 1],
-                                        strides=[1, 1, 1, 1], padding='VALID')
-                pooled_outputs.append(pooled)
-            # Combine all the pooled features
-            h_pool = tf.concat(pooled_outputs, axis=3)
-            num_filters_total = num_filters * len(filter_sizes)
-            domain_vec_cnn = tf.reshape(h_pool, [-1, num_filters_total])
-            domain_vec_cnn = tf.layers.dropout(domain_vec_cnn, dropout_rate, training=is_training)
-            domain_vectors.append(domain_vec_cnn)
+            logits = domain_vectors[0]
 
-        logits = domain_vectors[0]
+            W_T = tf.Variable(tf.truncated_normal([n_rnn_neurons, n_rnn_neurons], stddev=0.1), name="weight_transform")
+            b_T = tf.Variable(tf.constant(1.0, shape=[n_rnn_neurons]), name="bias_transform")
 
-        W_T = tf.Variable(tf.truncated_normal([n_rnn_neurons, n_rnn_neurons], stddev=0.1), name="weight_transform")
-        b_T = tf.Variable(tf.constant(1.0, shape=[n_rnn_neurons]), name="bias_transform")
+            for _ in range(n_fc_layers):
+                logits = tf.contrib.layers.fully_connected(logits, num_outputs=n_rnn_neurons, activation_fn=act_fn)
+                logits = tf.layers.dropout(logits, dropout_rate, training=is_training)
 
-        for _ in range(n_fc_layers):
-            logits = tf.contrib.layers.fully_connected(logits, num_outputs=n_rnn_neurons, activation_fn=act_fn)
-            logits = tf.layers.dropout(logits, dropout_rate, training=is_training)
+            T = tf.sigmoid(tf.matmul(logits, W_T) + b_T, name="transform_gate")
+            C = tf.subtract(1.0, T, name="carry_gate")
 
-        T = tf.sigmoid(tf.matmul(logits, W_T) + b_T, name="transform_gate")
-        C = tf.subtract(1.0, T, name="carry_gate")
+            logits = tf.add(tf.multiply(logits, T), tf.multiply(logits, C), "y")
 
-        logits = tf.add(tf.multiply(logits, T), tf.multiply(logits, C), "y")
-
-        logits_pred = tf.contrib.layers.fully_connected(logits, self.params['num_targets'], activation_fn=act_fn)
+            logits_pred = tf.contrib.layers.fully_connected(logits, self.params['num_targets'], activation_fn=act_fn)
 
         reconstruction_loss = tf.sqrt(tf.losses.mean_squared_error(x_desc, logits_pred, weights=1.0))
 
