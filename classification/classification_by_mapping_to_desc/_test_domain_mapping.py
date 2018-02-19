@@ -52,10 +52,10 @@ print("Loading the FastText Model")
 en_model = FastText.load_fasttext_format('../../FastText/wiki.en/wiki.en')
 
 
-domain2logits = pickle.load(open('domain2logits_logits_pred_relu.dict', 'rb'))
+domain2mapping = pickle.load(open('domain2mapping.dict', 'rb'))
 
 
-class DescDomainMapper:
+class PretrainFastTextClassifier:
 
     def __init__(self):
         origin_train_domains = pickle.load(open(OUTPUT_DIR + 'training_domains_%s.list' % DATASET, 'rb'))
@@ -82,7 +82,7 @@ class DescDomainMapper:
 
     def next_batch(self, domains, batch_size=batch_size):
         X_batch_domain = []
-        X_batch_desc = []
+        X_batch_target = []
         shuffle(domains)
         start_index = 0
         while start_index < len(domains):
@@ -98,15 +98,15 @@ class DescDomainMapper:
                 # X_batch_embed.append(tf.pad(embeds, paddings=[[0, n_extra_padding],[0,0]], mode="CONSTANT"))
                 X_batch_domain.append(embeds_domain)
 
-                ''' description '''
-                embeds_desc = domain2logits[domains[i]['raw_domain']]
-                X_batch_desc.append(embeds_desc)
+                ''' domain mapping '''
+                embeds_target = domain2mapping[domains[i]['raw_domain']]
+                X_batch_target.append(embeds_target)
 
 
-            yield np.array(X_batch_domain), np.array(X_batch_desc)
+            yield np.array(X_batch_domain), np.array(X_batch_target)
 
             X_batch_domain.clear()
-            X_batch_desc.clear()
+            X_batch_target.clear()
             start_index += batch_size
 
 
@@ -114,12 +114,12 @@ class DescDomainMapper:
         total_loss = 0
         total_mapping = []
         n_batch = 0
-        for X_batch_domain, X_batch_desc in self.next_batch(data):
+        for X_batch_domain, X_batch_target in self.next_batch(data):
             batch_loss, batch_mapping = session.run(eval_nodes,
                                                          feed_dict={
                                                                     'bool_train:0': False,
                                                                     'domain_embed:0': X_batch_domain,
-                                                                    'desc_embed:0': X_batch_desc,
+                                                                    'target_embed:0': X_batch_target,
                                                                     })
             total_loss += batch_loss
             total_mapping.extend(batch_mapping)
@@ -139,9 +139,9 @@ class DescDomainMapper:
                                  name='domain_embed')
 
         # print(x_embed.get_shape())
-        x_desc = tf.placeholder(tf.float32,
+        x_target = tf.placeholder(tf.float32,
                                  shape=[None, self.params['num_targets']],
-                                 name='desc_embed')
+                                 name='target_embed')
 
 
         domain_vectors = []
@@ -150,8 +150,8 @@ class DescDomainMapper:
             for filter_size in filter_sizes:
                 # Define and initialize filters
                 filter_shape = [filter_size, embed_dimen, 1, num_filters]
-                W_filter = tf.Variable(tf.truncated_normal(filter_shape, stddev=0.1)) # initialize the filters' weights
-                b_filter = tf.Variable(tf.constant(0.1, shape=[num_filters]))  # initialize the filters' biases
+                W_filter = tf.Variable(tf.truncated_normal(filter_shape, stddev=0.1), trainable=False) # initialize the filters' weights
+                b_filter = tf.Variable(tf.constant(0.1, shape=[num_filters]), trainable=False)  # initialize the filters' biases
                 # The conv2d operation expects a 4-D tensor with dimensions corresponding to batch, width, height and channel.
                 # The result of our embedding doesn’t contain the channel dimension
                 # So we add it manually, leaving us with a layer of shape [None, sequence_length, embedding_size, 1].
@@ -171,11 +171,11 @@ class DescDomainMapper:
 
         logits = domain_vectors[0]
 
-        W_T = tf.Variable(tf.truncated_normal([n_rnn_neurons, n_rnn_neurons], stddev=0.1), name="weight_transform")
-        b_T = tf.Variable(tf.constant(1.0, shape=[n_rnn_neurons]), name="bias_transform")
+        W_T = tf.Variable(tf.truncated_normal([n_rnn_neurons, n_rnn_neurons], stddev=0.1), name="weight_transform", trainable=False)
+        b_T = tf.Variable(tf.constant(1.0, shape=[n_rnn_neurons]), name="bias_transform", trainable=False)
 
         for _ in range(n_fc_layers):
-            logits = tf.contrib.layers.fully_connected(logits, num_outputs=n_rnn_neurons, activation_fn=act_fn)
+            logits = tf.contrib.layers.fully_connected(logits, num_outputs=n_rnn_neurons, activation_fn=act_fn, trainable=False)
             logits = tf.layers.dropout(logits, dropout_rate, training=is_training)
 
         T = tf.sigmoid(tf.matmul(logits, W_T) + b_T, name="transform_gate")
@@ -183,38 +183,47 @@ class DescDomainMapper:
 
         logits = tf.add(tf.multiply(logits, T), tf.multiply(logits, C), "y")
 
-        logits_pred = tf.contrib.layers.fully_connected(logits, self.params['num_targets'], activation_fn=act_fn)
+        logits_pred = tf.contrib.layers.fully_connected(logits, self.params['num_targets'], activation_fn=act_fn, trainable=False)
 
-        reconstruction_loss = tf.sqrt(tf.losses.mean_squared_error(x_desc, logits_pred, weights=1.0))
+        reconstruction_loss = tf.sqrt(tf.losses.mean_squared_error(x_target, logits_pred, weights=1.0))
 
         reg_losses = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
         loss = reconstruction_loss + calibration_reg_factor * sum(reg_losses)
 
-        optimizer = tf.train.AdamOptimizer(autoencoder_lr_rate)
-        training_op = optimizer.minimize(loss)
+        # optimizer = tf.train.AdamOptimizer(autoencoder_lr_rate)
+        # training_op = optimizer.minimize(loss)
 
-        # variables_to_save = {v.name: v for v in tf.global_variables()}
-        # saver_for_domain_save = tf.train.Saver({**variables_to_save})
+
+        # variables_to_restore = {v.name: v for v in tf.global_variables()}
+        # print("variables_to_restore:", sorted(variables_to_restore.keys()))
+        # saver_for_restore = tf.train.Saver({**variables_to_restore})
 
         # Add ops to save and restore all the variables.
         saver = tf.train.Saver()
+
+        print(tf.trainable_variables())
+        assert [] == [v for v in tf.trainable_variables()]
 
         init = tf.global_variables_initializer()
 
 
         with tf.Session() as sess:
             init.run()
-            test_loss_history = []
+
+            saver.restore(sess, os.path.join(OUTPUT_DIR, 'domain_mapping.params'))
+            print("Model restored.")
+
+
             n_total_batches = int(np.ceil(len(self.domains_train) / batch_size))
             for epoch in range(1, n_epochs + 1):
                 # model training
                 n_batch = 0
-                for X_batch_domain, X_batch_desc in self.next_batch(self.domains_train):
-                    _, loss_batch_train = sess.run([training_op, loss],
+                for X_batch_domain, X_batch_target in self.next_batch(self.domains_train):
+                    loss_batch_train = sess.run(loss,
                                                                     feed_dict={
                                                                                'bool_train:0': True,
                                                                                'domain_embed:0': X_batch_domain,
-                                                                               'desc_embed:0': X_batch_desc,
+                                                                               'target_embed:0': X_batch_target,
                                                                                })
 
                     n_batch += 1
@@ -246,21 +255,7 @@ class DescDomainMapper:
 
 
 
-                test_loss_history.append(loss_test)
-                if loss_test == min(test_loss_history):
-                    domain2mapping = {}
-                    for domains, mapping_vec in ((self.domains_train, mapping_train),
-                                                (self.domains_val, mapping_val),
-                                                (self.domains_test, mapping_test)):
-                        for domain, vec in zip(domains, mapping_vec):
-                            domain2mapping[domain['raw_domain']] = vec
-                    pickle.dump(domain2mapping, open('domain2mapping.dict', 'wb'))
-
-                    saver.save(sess, os.path.join(OUTPUT_DIR, 'domain_mapping.params'))
-                    print('Save on the disk at %s' % datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
-
-
 
 if __name__ == '__main__':
-    classifier = DescDomainMapper()
+    classifier = PretrainFastTextClassifier()
     classifier.run_graph()

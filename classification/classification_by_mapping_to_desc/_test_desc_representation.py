@@ -46,15 +46,15 @@ for cate, i in category2index.items():
     categories[i] = cate
 print(categories)
 
-domain2logits1 = pickle.load(open('domain2logits_logits_pred_relu.dict', 'rb'))
-# domain2logits = pickle.load(open('domain2mapping.dict', 'rb'))
-#
-# # print(list(domain2logits.items())[:3])
-# # print(domain2logits['http://massbaytrading.com/'])
-# # print(domain2logits['http://www.angelfire.com/myband/capital/'])
-# # print(domain2logits['http://www.atouchofglass.com/'])
-# # print(domain2logits['http://www.theguardian.com/film/movie/94090/etre.et.avoir'])
-#
+# domain2logits = pickle.load(open('domain2logits_logits_pred_relu.dict', 'rb'))
+domain2logits = pickle.load(open('domain2mapping.dict', 'rb'))
+
+# print(list(domain2logits.keys())[:3])
+# print(domain2logits['http://massbaytrading.com/'])
+# print(domain2logits['http://www.angelfire.com/myband/capital/'])
+# print(domain2logits['http://www.atouchofglass.com/'])
+# print(domain2logits['http://www.theguardian.com/film/movie/94090/etre.et.avoir'])
+
 # print([domain2logits[d] == domain2logits1[d] for d in domain2logits])
 
 

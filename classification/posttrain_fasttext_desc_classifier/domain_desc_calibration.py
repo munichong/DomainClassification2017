@@ -339,7 +339,7 @@ class domain_desc_calibrator:
 
 
 
-        reconstruction_loss = tf.losses.mean_squared_error(cat_layer_desc, cat_layer_domain, weights=1.0)
+        reconstruction_loss = tf.losses.mean_squared_error(cat_layer_domain, cat_layer_desc, weights=1.0)
 
         reg_losses = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
         loss = reconstruction_loss + calibration_reg_factor * sum(reg_losses)

@@ -88,8 +88,8 @@ class PretrainFastTextClassifier:
             for i in range(start_index, min(len(domains), start_index + batch_size)):
                 # skip if a segment is not in en_model
                 embeds = [en_model[w].tolist() for w in domains[i]['segmented_domain'] if w in en_model]
-                if not embeds: # Skip if none of segments of this domain can not be recognized by FastText
-                    continue
+                # if not embeds: # Skip if none of segments of this domain can not be recognized by FastText
+                #     continue
                 domain_actual_lens.append(len(embeds))
                 n_extra_padding = self.params['max_domain_segments_len'] - len(embeds)
                 embeds += [[0] * embed_dimen for _ in range(n_extra_padding)]
