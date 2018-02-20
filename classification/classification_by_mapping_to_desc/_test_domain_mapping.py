@@ -18,7 +18,7 @@ DATASET = 'content'  # 'content' or '2340768'
 
 type = 'CNN'
 # For RNN
-n_rnn_neurons = 512
+n_rnn_neurons = 300
 # For CNN
 filter_sizes = [2,1]
 
@@ -30,7 +30,7 @@ dropout_rate= 0.2
 n_fc_layers= 3
 act_fn = tf.nn.relu
 
-n_epochs = 30
+n_epochs = 5
 batch_size = 32
 lr_rate = 0.001
 

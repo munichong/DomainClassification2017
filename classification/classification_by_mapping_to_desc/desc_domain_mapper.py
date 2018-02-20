@@ -18,7 +18,7 @@ DATASET = 'content'  # 'content' or '2340768'
 
 type = 'CNN'
 # For RNN
-n_rnn_neurons = 512
+n_rnn_neurons = 300
 # For CNN
 filter_sizes = [2,1]
 
