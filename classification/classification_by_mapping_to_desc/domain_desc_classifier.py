@@ -29,7 +29,7 @@ dropout_rate= 0.2
 n_fc_layers= 3
 act_fn = tf.nn.relu
 
-n_epochs = 80
+n_epochs = 50
 batch_size = 2000
 lr_rate = 0.001
 
@@ -194,24 +194,24 @@ class PretrainFastTextClassifier:
                 h_pool = tf.concat(pooled_outputs, axis=3)
                 num_filters_total = num_filters * len(filter_sizes)
                 domain_vec_cnn = tf.reshape(h_pool, [-1, num_filters_total])
-                domain_vec_cnn = tf.layers.dropout(domain_vec_cnn, dropout_rate, training=is_training)
+                domain_vec_cnn = tf.layers.dropout(domain_vec_cnn, dropout_rate, training=False)
                 domain_vectors.append(domain_vec_cnn)
 
             logits = domain_vectors[0]
 
-            W_T = tf.Variable(tf.truncated_normal([n_rnn_neurons, n_rnn_neurons], stddev=0.1), name="weight_transform", trainable=True)
-            b_T = tf.Variable(tf.constant(1.0, shape=[n_rnn_neurons]), name="bias_transform", trainable=True)
+            W_T = tf.Variable(tf.truncated_normal([n_rnn_neurons, n_rnn_neurons], stddev=0.1), name="weight_transform", trainable=False)
+            b_T = tf.Variable(tf.constant(1.0, shape=[n_rnn_neurons]), name="bias_transform", trainable=False)
 
             for _ in range(n_fc_layers):
-                logits = tf.contrib.layers.fully_connected(logits, num_outputs=n_rnn_neurons, activation_fn=act_fn, trainable=True)
-                logits = tf.layers.dropout(logits, dropout_rate, training=is_training)
+                logits = tf.contrib.layers.fully_connected(logits, num_outputs=n_rnn_neurons, activation_fn=act_fn, trainable=False)
+                logits = tf.layers.dropout(logits, dropout_rate, training=False)
 
             T = tf.sigmoid(tf.matmul(logits, W_T) + b_T, name="transform_gate")
             C = tf.subtract(1.0, T, name="carry_gate")
 
             logits = tf.add(tf.multiply(logits, T), tf.multiply(logits, C), "y")
 
-            logits1 = tf.contrib.layers.fully_connected(logits, self.params['num_targets'], activation_fn=act_fn, trainable=True)
+            logits1 = tf.contrib.layers.fully_connected(logits, self.params['num_targets'], activation_fn=act_fn, trainable=False)
 
         saver = tf.train.Saver()
 
@@ -279,7 +279,8 @@ class PretrainFastTextClassifier:
 
         logits1_softmax = tf.nn.softmax(logits1)
         logits2_softmax = tf.nn.softmax(logits2)
-        combine_weight = tf.Variable(tf.constant(0.1))
+        # combine_weight = tf.Variable(tf.constant(0.1))
+        combine_weight = tf.constant(0.999)
         logits_combine = tf.add(tf.multiply(combine_weight, logits1_softmax),
                                 tf.multiply(tf.subtract(tf.constant(1.0), combine_weight), logits2_softmax))
 
@@ -393,17 +394,16 @@ class PretrainFastTextClassifier:
                                    headers=['category', 'precision', 'recall', 'f-score', 'support'],
                                    tablefmt='orgtbl'))
 
-                    # output all incorrect_prediction
-                    with open(os.path.join(OUTPUT_DIR, 'incorrect_predictions.csv'), 'w') as outfile:
+                    # output all correct_prediction
+                    with open(os.path.join(OUTPUT_DIR, 'correct_predictions.csv'), 'w') as outfile:
                         csv_writer = csv.writer(outfile)
-                        csv_writer.writerow(('RAW_DOMAIN', 'SEGMENTED_DOMAIN', 'TRUE_CATEGORY', 'PRED_CATEGORY'))
+                        csv_writer.writerow(('RAW_DOMAIN', 'SEGMENTED_DOMAIN', 'CATEGORY'))
                         for correct, pred_catIdx, domain in zip(is_correct_test, pred_test, self.domains_test):
-                            if correct:
+                            if not correct:
                                 continue
                             csv_writer.writerow((domain['raw_domain'],
                                                  domain['segmented_domain'],
-                                                 domain['categories'][1],
-                                                 categories[pred_catIdx]))
+                                                 domain['categories'][1].strip()))
                 test_fscore_history.append(fscores_macro)
 
 
