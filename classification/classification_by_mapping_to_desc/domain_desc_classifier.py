@@ -121,9 +121,9 @@ class PretrainFastTextClassifier:
         total_bool = []
         total_pred = []
         n_batch = 0
-        combine_weight = None
+        desc_imp = None
         for X_batch_embed, domain_actual_lens, X_batch_suf, sample_weights, y_batch in self.next_batch(data):
-            batch_correct, batch_loss, batch_bool, batch_pred, batch_logits1, batch_logits2, batch_combine_weight = session.run(eval_nodes,
+            batch_correct, batch_loss, batch_bool, batch_pred, batch_logits1, batch_logits2, batch_desc_imp = session.run(eval_nodes,
                                                          feed_dict={
                                                                     'bool_train:0': False,
                                                                     'embedding:0': X_batch_embed,
@@ -133,9 +133,9 @@ class PretrainFastTextClassifier:
                                                                     'target:0': y_batch})
             # print(batch_logits1)
             # print(batch_logits2)
-            if combine_weight == None:
-                print(batch_combine_weight)
-            combine_weight = batch_combine_weight
+            if desc_imp is None:
+                print(batch_desc_imp)
+            desc_imp = batch_desc_imp
 
             total_loss += batch_loss
             total_correct += batch_correct
@@ -279,10 +279,12 @@ class PretrainFastTextClassifier:
 
         logits1_softmax = tf.nn.softmax(logits1)
         logits2_softmax = tf.nn.softmax(logits2)
-        # combine_weight = tf.Variable(tf.constant(0.1))
-        combine_weight = tf.constant(0.999)
-        logits_combine = tf.add(tf.multiply(combine_weight, logits1_softmax),
-                                tf.multiply(tf.subtract(tf.constant(1.0), combine_weight), logits2_softmax))
+        desc_imp = tf.Variable(tf.constant(0.5))
+
+        # desc_imp = tf.contrib.layers.fully_connected(logits2, 1, activation_fn=tf.nn.sigmoid)  # shape (None, 1)
+
+        logits_combine = tf.add(tf.multiply(desc_imp, logits1_softmax),
+                                tf.multiply(tf.subtract(tf.constant(1.0), desc_imp), logits2_softmax))
 
         crossentropy = tf.reduce_mean(-tf.reduce_sum(tf.one_hot(y, self.params['num_targets']) * tf.log(logits_combine), [1]))
 
@@ -353,7 +355,7 @@ class PretrainFastTextClassifier:
 
 
                 # evaluation on training data
-                eval_nodes = [n_correct, loss_mean, is_correct, prediction, logits1, logits2, combine_weight]
+                eval_nodes = [n_correct, loss_mean, is_correct, prediction, logits1, logits2, desc_imp]
                 print()
                 print("========== Evaluation at Epoch %d ==========" % epoch)
                 loss_train, acc_train, _, _ = self.evaluate(self.domains_train, sess, eval_nodes)
@@ -395,7 +397,7 @@ class PretrainFastTextClassifier:
                                    tablefmt='orgtbl'))
 
                     # output all correct_prediction
-                    with open(os.path.join(OUTPUT_DIR, 'correct_predictions.csv'), 'w') as outfile:
+                    with open(os.path.join(OUTPUT_DIR, 'correct_predictions.csv'), 'w', newline="\n") as outfile:
                         csv_writer = csv.writer(outfile)
                         csv_writer.writerow(('RAW_DOMAIN', 'SEGMENTED_DOMAIN', 'CATEGORY'))
                         for correct, pred_catIdx, domain in zip(is_correct_test, pred_test, self.domains_test):

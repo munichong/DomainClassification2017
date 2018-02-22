@@ -321,7 +321,7 @@ class PretrainFastTextClassifier:
                                    tablefmt='orgtbl'))
 
                     # output all incorrect_prediction
-                    with open(os.path.join(OUTPUT_DIR, 'incorrect_predictions.csv'), 'w') as outfile:
+                    with open(os.path.join(OUTPUT_DIR, 'incorrect_predictions.csv'), 'w', newline="\n") as outfile:
                         csv_writer = csv.writer(outfile)
                         csv_writer.writerow(('RAW_DOMAIN', 'SEGMENTED_DOMAIN', 'TRUE_CATEGORY', 'PRED_CATEGORY'))
                         for correct, pred_catIdx, domain in zip(is_correct_test, pred_test, self.domains_test):
