@@ -122,8 +122,9 @@ class PretrainFastTextClassifier:
         total_pred = []
         n_batch = 0
         desc_imp = None
+        domain_imp = None
         for X_batch_embed, domain_actual_lens, X_batch_suf, sample_weights, y_batch in self.next_batch(data):
-            batch_correct, batch_loss, batch_bool, batch_pred, batch_logits1, batch_logits2, batch_desc_imp = session.run(eval_nodes,
+            batch_correct, batch_loss, batch_bool, batch_pred, batch_desc_imp, batch_logsoft1, batch_logsoft2 = session.run(eval_nodes,
                                                          feed_dict={
                                                                     'bool_train:0': False,
                                                                     'embedding:0': X_batch_embed,
@@ -135,7 +136,11 @@ class PretrainFastTextClassifier:
             # print(batch_logits2)
             if desc_imp is None:
                 print(batch_desc_imp)
+                # print(batch_domain_imp)
+                print(batch_logsoft1)
+                print(batch_logsoft2)
             desc_imp = batch_desc_imp
+            # domain_imp =batch_domain_imp
 
             total_loss += batch_loss
             total_correct += batch_correct
@@ -172,32 +177,32 @@ class PretrainFastTextClassifier:
 
 
         with tf.variable_scope('domain_mapping'):
-            domain_vectors = []
-            if 'CNN' in type:
-                pooled_outputs = []
-                for filter_size in filter_sizes:
-                    # Define and initialize filters
-                    filter_shape = [filter_size, embed_dimen, 1, num_filters]
-                    W_filter = tf.Variable(tf.truncated_normal(filter_shape, stddev=0.1), trainable=False) # initialize the filters' weights
-                    b_filter = tf.Variable(tf.constant(0.1, shape=[num_filters]), trainable=False)  # initialize the filters' biases
-                    # The conv2d operation expects a 4-D tensor with dimensions corresponding to batch, width, height and channel.
-                    # The result of our embedding doesn’t contain the channel dimension
-                    # So we add it manually, leaving us with a layer of shape [None, sequence_length, embedding_size, 1].
-                    x_embed_expanded = tf.expand_dims(x_embed, -1)
-                    conv = tf.nn.conv2d(x_embed_expanded, W_filter, strides=[1, 1, 1, 1], padding="VALID")
-                    # Apply nonlinearity
-                    h = tf.nn.relu(tf.nn.bias_add(conv, b_filter), name="relu")
-                    pooled = tf.nn.max_pool(h, ksize=[1, self.params['max_domain_segments_len'] - filter_size + 1, 1, 1],
-                                            strides=[1, 1, 1, 1], padding='VALID')
-                    pooled_outputs.append(pooled)
-                # Combine all the pooled features
-                h_pool = tf.concat(pooled_outputs, axis=3)
-                num_filters_total = num_filters * len(filter_sizes)
-                domain_vec_cnn = tf.reshape(h_pool, [-1, num_filters_total])
-                domain_vec_cnn = tf.layers.dropout(domain_vec_cnn, dropout_rate, training=False)
-                domain_vectors.append(domain_vec_cnn)
 
-            logits = domain_vectors[0]
+
+            pooled_outputs = []
+            for filter_size in filter_sizes:
+                # Define and initialize filters
+                filter_shape = [filter_size, embed_dimen, 1, num_filters]
+                W_filter = tf.Variable(tf.truncated_normal(filter_shape, stddev=0.1), trainable=False) # initialize the filters' weights
+                b_filter = tf.Variable(tf.constant(0.1, shape=[num_filters]), trainable=False)  # initialize the filters' biases
+                # The conv2d operation expects a 4-D tensor with dimensions corresponding to batch, width, height and channel.
+                # The result of our embedding doesn’t contain the channel dimension
+                # So we add it manually, leaving us with a layer of shape [None, sequence_length, embedding_size, 1].
+                x_embed_expanded = tf.expand_dims(x_embed, -1)
+                conv = tf.nn.conv2d(x_embed_expanded, W_filter, strides=[1, 1, 1, 1], padding="VALID")
+                # Apply nonlinearity
+                h = tf.nn.relu(tf.nn.bias_add(conv, b_filter), name="relu")
+                pooled = tf.nn.max_pool(h, ksize=[1, self.params['max_domain_segments_len'] - filter_size + 1, 1, 1],
+                                        strides=[1, 1, 1, 1], padding='VALID')
+                pooled_outputs.append(pooled)
+            # Combine all the pooled features
+            h_pool = tf.concat(pooled_outputs, axis=3)
+            num_filters_total = num_filters * len(filter_sizes)
+            domain_vec_cnn1 = tf.reshape(h_pool, [-1, num_filters_total])
+            domain_vec_cnn1 = tf.layers.dropout(domain_vec_cnn1, dropout_rate, training=False)
+
+
+            logits = domain_vec_cnn1
 
             W_T = tf.Variable(tf.truncated_normal([n_rnn_neurons, n_rnn_neurons], stddev=0.1), name="weight_transform", trainable=False)
             b_T = tf.Variable(tf.constant(1.0, shape=[n_rnn_neurons]), name="bias_transform", trainable=False)
@@ -217,15 +222,9 @@ class PretrainFastTextClassifier:
 
 
 
+        with tf.variable_scope('domain_cnn'):
+            domain_vectors = []
 
-        domain_vectors = []
-        if 'RNN' in type:
-            rnn_cell = tf.contrib.rnn.BasicRNNCell(n_rnn_neurons, activation=tf.nn.tanh)
-            # The shape of last_states should be [batch_size, n_lstm_neurons]
-            _, domain_vec_rnn = tf.nn.dynamic_rnn(rnn_cell, x_embed, sequence_length=seq_len, dtype=tf.float32, time_major=False)
-            domain_vec_rnn = tf.layers.dropout(domain_vec_rnn, dropout_rate, training=is_training)
-            domain_vectors.append(domain_vec_rnn)
-        if 'CNN' in type:
             pooled_outputs = []
             for filter_size in filter_sizes:
                 # Define and initialize filters
@@ -245,23 +244,32 @@ class PretrainFastTextClassifier:
             # Combine all the pooled features
             h_pool = tf.concat(pooled_outputs, axis=3)
             num_filters_total = num_filters * len(filter_sizes)
-            domain_vec_cnn = tf.reshape(h_pool, [-1, num_filters_total])
-            domain_vec_cnn = tf.layers.dropout(domain_vec_cnn, dropout_rate, training=is_training)
-            domain_vectors.append(domain_vec_cnn)
+            domain_vec_cnn2 = tf.reshape(h_pool, [-1, num_filters_total])
+            domain_vec_cnn2 = tf.layers.dropout(domain_vec_cnn2, dropout_rate, training=is_training)
+            domain_vectors.append(domain_vec_cnn2)
 
 
 
-        # concatenate suffix one-hot and the abstract representation of the domains segments
-        # The shape of cat_layer should be [batch_size, n_lstm_neurons+self.params['num_suffix']]
-        cat_layer = tf.concat(domain_vectors + [x_suffix], -1)
-        # print(cat_layer.get_shape())
+            # concatenate suffix one-hot and the abstract representation of the domains segments
+            # The shape of cat_layer should be [batch_size, n_lstm_neurons+self.params['num_suffix']]
+            cat_layer = tf.concat(domain_vectors + [x_suffix], -1)
+            # print(cat_layer.get_shape())
 
-        logits = cat_layer
-        for _ in range(n_fc_layers):
-            logits = tf.contrib.layers.fully_connected(logits, num_outputs=n_rnn_neurons, activation_fn=act_fn)
-            logits = tf.layers.dropout(logits, dropout_rate, training=is_training)
+            W_T = tf.Variable(tf.truncated_normal([n_rnn_neurons, n_rnn_neurons], stddev=0.1), name="weight_transform")
+            b_T = tf.Variable(tf.constant(1.0, shape=[n_rnn_neurons]), name="bias_transform")
 
-        logits2 = tf.contrib.layers.fully_connected(logits, self.params['num_targets'], activation_fn=act_fn)
+            logits = cat_layer
+            for _ in range(n_fc_layers):
+                logits = tf.contrib.layers.fully_connected(logits, num_outputs=n_rnn_neurons, activation_fn=act_fn)
+                logits = tf.layers.dropout(logits, dropout_rate, training=is_training)
+
+            T = tf.sigmoid(tf.matmul(logits, W_T) + b_T, name="transform_gate")
+            C = tf.subtract(1.0, T, name="carry_gate")
+
+            logits = tf.add(tf.multiply(logits, T), tf.multiply(logits, C), "y")
+
+            logits2 = tf.contrib.layers.fully_connected(logits, self.params['num_targets'], activation_fn=act_fn)
+
 
 
 
@@ -277,21 +285,29 @@ class PretrainFastTextClassifier:
         logits_combine = tf.contrib.layers.fully_connected(cat_logits, self.params['num_targets'], activation_fn=act_fn)
         '''
 
-        logits1_softmax = tf.nn.softmax(logits1)
-        logits2_softmax = tf.nn.softmax(logits2)
-        desc_imp = tf.Variable(tf.constant(0.5))
+        # logits1_softmax = tf.nn.softmax(logits1)
+        # logits2_softmax = tf.nn.softmax(logits2)
+        # desc_imp = tf.Variable(tf.constant(0.5))
 
-        # desc_imp = tf.contrib.layers.fully_connected(logits2, 1, activation_fn=tf.nn.sigmoid)  # shape (None, 1)
+        # logits1 = tf.contrib.layers.fully_connected(logits1, self.params['num_targets'], activation_fn=tf.nn.tanh)
+        # logits2 = tf.contrib.layers.fully_connected(logits2, self.params['num_targets'], activation_fn=tf.nn.tanh)
 
-        logits_combine = tf.add(tf.multiply(desc_imp, logits1_softmax),
-                                tf.multiply(tf.subtract(tf.constant(1.0), desc_imp), logits2_softmax))
+        logits1 = tf.nn.l2_normalize(logits1, dim=-1)
+        # logits2 = tf.nn.l2_normalize(logits2, dim=-1)
 
-        crossentropy = tf.reduce_mean(-tf.reduce_sum(tf.one_hot(y, self.params['num_targets']) * tf.log(logits_combine), [1]))
+        desc_imp = tf.contrib.layers.fully_connected(logits1, 1, activation_fn=tf.nn.sigmoid)
+        # domain_imp = tf.contrib.layers.fully_connected(logits2, 1, activation_fn=tf.nn.sigmoid)
 
 
-        '''
+        logits_combine = tf.add(tf.multiply(desc_imp, logits1),
+                                tf.multiply(tf.subtract(tf.constant(1.0), desc_imp), logits2))
+
+        # crossentropy = tf.reduce_mean(-tf.reduce_sum(tf.one_hot(y, self.params['num_targets']) * tf.log(logits_combine), [1]))
+
+
+
         crossentropy = tf.losses.sparse_softmax_cross_entropy(labels=y, logits=logits_combine)
-        '''
+
 
         loss_mean = tf.reduce_mean(crossentropy)
         optimizer = tf.train.AdamOptimizer(learning_rate=lr_rate)
@@ -355,7 +371,7 @@ class PretrainFastTextClassifier:
 
 
                 # evaluation on training data
-                eval_nodes = [n_correct, loss_mean, is_correct, prediction, logits1, logits2, desc_imp]
+                eval_nodes = [n_correct, loss_mean, is_correct, prediction, desc_imp, logits1, logits2]
                 print()
                 print("========== Evaluation at Epoch %d ==========" % epoch)
                 loss_train, acc_train, _, _ = self.evaluate(self.domains_train, sess, eval_nodes)
