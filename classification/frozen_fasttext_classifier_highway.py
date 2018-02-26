@@ -206,10 +206,7 @@ class PretrainFastTextClassifier:
 
         # concatenate suffix one-hot and the abstract representation of the domains segments
         # The shape of cat_layer should be [batch_size, n_cnn_neurons + self.params['num_suffix']]
-        logits = tf.concat(domain_vectors + [x_suffix], -1)
-        # print(cat_layer.get_shape())
-
-        size = logits.get_shape().as_list()[-1]
+        logits0 = tf.concat(domain_vectors + [x_suffix], -1)
 
 
         W_T = tf.Variable(tf.truncated_normal([n_rnn_neurons, n_rnn_neurons], stddev=0.1), name="weight_transform")
@@ -217,17 +214,23 @@ class PretrainFastTextClassifier:
 
         # W = tf.Variable(tf.truncated_normal([size, size], stddev=0.1), name="weight")
         # b = tf.Variable(tf.constant(0.1, shape=[size]), name="bias")
-        print(logits.get_shape())
-        for _ in range(n_fc_layers):
-            logits = tf.contrib.layers.fully_connected(logits, num_outputs=n_rnn_neurons, activation_fn=act_fn)
-            logits = tf.layers.dropout(logits, dropout_rate, training=is_training)
 
-        print(logits.get_shape())
-        print(W_T.get_shape())
-        T = tf.sigmoid(tf.matmul(logits, W_T) + b_T, name="transform_gate")
+        logits1 = tf.contrib.layers.fully_connected(logits0, num_outputs=n_rnn_neurons, activation_fn=act_fn)
+        logits1 = tf.layers.dropout(logits1, dropout_rate, training=is_training)
+        logits2 = tf.contrib.layers.fully_connected(logits1, num_outputs=n_rnn_neurons, activation_fn=act_fn)
+        logits2 = tf.layers.dropout(logits2, dropout_rate, training=is_training)
+        logits3 = tf.contrib.layers.fully_connected(logits2, num_outputs=n_rnn_neurons, activation_fn=act_fn)
+        logits3 = tf.layers.dropout(logits3, dropout_rate, training=is_training)
+        logits4 = tf.contrib.layers.fully_connected(logits3, num_outputs=n_rnn_neurons, activation_fn=act_fn)
+        logits4 = tf.layers.dropout(logits4, dropout_rate, training=is_training)
+        logits5 = tf.contrib.layers.fully_connected(logits4, num_outputs=n_rnn_neurons, activation_fn=act_fn)
+        logits5 = tf.layers.dropout(logits5, dropout_rate, training=is_training)
+
+
+        T = tf.sigmoid(tf.matmul(logits1, W_T) + b_T, name="transform_gate")
         C = tf.subtract(1.0, T, name="carry_gate")
 
-        logits = tf.add(tf.multiply(logits, T), tf.multiply(logits, C), "y")
+        logits = tf.add(tf.multiply(logits5, T), tf.multiply(logits1, C), "y")
 
 
 

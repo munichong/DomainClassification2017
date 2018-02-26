@@ -204,17 +204,9 @@ class PretrainFastTextClassifier:
 
             logits = domain_vec_cnn1
 
-            W_T = tf.Variable(tf.truncated_normal([n_rnn_neurons, n_rnn_neurons], stddev=0.1), name="weight_transform", trainable=False)
-            b_T = tf.Variable(tf.constant(1.0, shape=[n_rnn_neurons]), name="bias_transform", trainable=False)
-
             for _ in range(n_fc_layers):
                 logits = tf.contrib.layers.fully_connected(logits, num_outputs=n_rnn_neurons, activation_fn=act_fn, trainable=False)
                 logits = tf.layers.dropout(logits, dropout_rate, training=False)
-
-            T = tf.sigmoid(tf.matmul(logits, W_T) + b_T, name="transform_gate")
-            C = tf.subtract(1.0, T, name="carry_gate")
-
-            logits = tf.add(tf.multiply(logits, T), tf.multiply(logits, C), "y")
 
             logits1 = tf.contrib.layers.fully_connected(logits, self.params['num_targets'], activation_fn=act_fn, trainable=False)
 
@@ -284,23 +276,52 @@ class PretrainFastTextClassifier:
         cat_logits = tf.concat([logits1, logits2], -1)
         logits_combine = tf.contrib.layers.fully_connected(cat_logits, self.params['num_targets'], activation_fn=act_fn)
         '''
+        '''
+        with tf.variable_scope('desc_weighting'):
+            pooled_outputs = []
+            for filter_size in filter_sizes:
+                # Define and initialize filters
+                filter_shape = [filter_size, embed_dimen, 1, num_filters]
+                W_filter = tf.Variable(tf.truncated_normal(filter_shape, stddev=0.1)) # initialize the filters' weights
+                b_filter = tf.Variable(tf.constant(0.1, shape=[num_filters]))  # initialize the filters' biases
+                # The conv2d operation expects a 4-D tensor with dimensions corresponding to batch, width, height and channel.
+                # The result of our embedding doesn’t contain the channel dimension
+                # So we add it manually, leaving us with a layer of shape [None, sequence_length, embedding_size, 1].
+                x_embed_expanded = tf.expand_dims(x_embed, -1)
+                conv = tf.nn.conv2d(x_embed_expanded, W_filter, strides=[1, 1, 1, 1], padding="VALID")
+                # Apply nonlinearity
+                h = tf.nn.relu(tf.nn.bias_add(conv, b_filter), name="relu")
+                pooled = tf.nn.max_pool(h, ksize=[1, self.params['max_domain_segments_len'] - filter_size + 1, 1, 1],
+                                        strides=[1, 1, 1, 1], padding='VALID')
+                pooled_outputs.append(pooled)
+            # Combine all the pooled features
+            h_pool = tf.concat(pooled_outputs, axis=3)
+            num_filters_total = num_filters * len(filter_sizes)
+            domain_vec_cnn3 = tf.reshape(h_pool, [-1, num_filters_total])
+        '''
 
         # logits1_softmax = tf.nn.softmax(logits1)
         # logits2_softmax = tf.nn.softmax(logits2)
-        # desc_imp = tf.Variable(tf.constant(0.5))
+        desc_imp = tf.Variable(tf.constant(0.5))
 
         # logits1 = tf.contrib.layers.fully_connected(logits1, self.params['num_targets'], activation_fn=tf.nn.tanh)
         # logits2 = tf.contrib.layers.fully_connected(logits2, self.params['num_targets'], activation_fn=tf.nn.tanh)
 
         logits1 = tf.nn.l2_normalize(logits1, dim=-1)
-        # logits2 = tf.nn.l2_normalize(logits2, dim=-1)
+        logits2 = tf.nn.l2_normalize(logits2, dim=-1)
 
-        desc_imp = tf.contrib.layers.fully_connected(logits1, 1, activation_fn=tf.nn.sigmoid)
+        # desc_imp = tf.contrib.layers.fully_connected(logits1, self.params['num_targets'], activation_fn=tf.nn.relu)
+        # desc_imp = tf.contrib.layers.fully_connected(desc_imp, self.params['num_targets'], activation_fn=tf.nn.relu)
+        # desc_imp = tf.contrib.layers.fully_connected(tf.nn.l2_normalize(domain_vec_cnn3, dim=-1), 1,
+        #                                              activation_fn=tf.nn.sigmoid)
+
         # domain_imp = tf.contrib.layers.fully_connected(logits2, 1, activation_fn=tf.nn.sigmoid)
 
 
-        logits_combine = tf.add(tf.multiply(desc_imp, logits1),
-                                tf.multiply(tf.subtract(tf.constant(1.0), desc_imp), logits2))
+        # logits_combine = tf.add(tf.multiply(desc_imp, logits1),
+        #                         tf.multiply(tf.subtract(tf.constant(1.0), desc_imp), logits2))
+
+        logits_combine = tf.multiply(logits1, logits2)
 
         # crossentropy = tf.reduce_mean(-tf.reduce_sum(tf.one_hot(y, self.params['num_targets']) * tf.log(logits_combine), [1]))
 

@@ -171,17 +171,9 @@ class DescDomainMapper:
 
             logits = domain_vectors[0]
 
-            W_T = tf.Variable(tf.truncated_normal([n_rnn_neurons, n_rnn_neurons], stddev=0.1), name="weight_transform")
-            b_T = tf.Variable(tf.constant(1.0, shape=[n_rnn_neurons]), name="bias_transform")
-
             for _ in range(n_fc_layers):
                 logits = tf.contrib.layers.fully_connected(logits, num_outputs=n_rnn_neurons, activation_fn=act_fn)
                 logits = tf.layers.dropout(logits, dropout_rate, training=is_training)
-
-            T = tf.sigmoid(tf.matmul(logits, W_T) + b_T, name="transform_gate")
-            C = tf.subtract(1.0, T, name="carry_gate")
-
-            logits = tf.add(tf.multiply(logits, T), tf.multiply(logits, C), "y")
 
             logits_pred = tf.contrib.layers.fully_connected(logits, self.params['num_targets'], activation_fn=act_fn)
 
