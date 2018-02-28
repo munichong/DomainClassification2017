@@ -29,7 +29,7 @@ dropout_rate= 0.2
 n_fc_layers= 3
 act_fn = tf.nn.relu
 
-n_epochs = 50
+n_epochs = 40
 batch_size = 2000
 lr_rate = 0.001
 
@@ -307,8 +307,8 @@ class PretrainFastTextClassifier:
         # logits1 = tf.contrib.layers.fully_connected(logits1, self.params['num_targets'], activation_fn=tf.nn.tanh)
         # logits2 = tf.contrib.layers.fully_connected(logits2, self.params['num_targets'], activation_fn=tf.nn.tanh)
 
-        logits1 = tf.nn.l2_normalize(logits1, dim=-1)
-        logits2 = tf.nn.l2_normalize(logits2, dim=-1)
+        # logits1 = tf.nn.l2_normalize(logits1, dim=-1)
+        # logits2 = tf.nn.l2_normalize(logits2, dim=-1)
 
         # desc_imp = tf.contrib.layers.fully_connected(logits1, self.params['num_targets'], activation_fn=tf.nn.relu)
         # desc_imp = tf.contrib.layers.fully_connected(desc_imp, self.params['num_targets'], activation_fn=tf.nn.relu)
@@ -318,10 +318,10 @@ class PretrainFastTextClassifier:
         # domain_imp = tf.contrib.layers.fully_connected(logits2, 1, activation_fn=tf.nn.sigmoid)
 
 
-        # logits_combine = tf.add(tf.multiply(desc_imp, logits1),
-        #                         tf.multiply(tf.subtract(tf.constant(1.0), desc_imp), logits2))
+        logits_combine = tf.add(tf.multiply(desc_imp, logits1),
+                                tf.multiply(tf.subtract(tf.constant(1.0), desc_imp), logits2))
 
-        logits_combine = tf.multiply(logits1, logits2)
+        # logits_combine = tf.multiply(logits1, logits2)
 
         # crossentropy = tf.reduce_mean(-tf.reduce_sum(tf.one_hot(y, self.params['num_targets']) * tf.log(logits_combine), [1]))
 
