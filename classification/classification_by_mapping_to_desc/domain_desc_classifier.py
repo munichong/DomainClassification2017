@@ -302,7 +302,13 @@ class PretrainFastTextClassifier:
 
         # logits1_softmax = tf.nn.softmax(logits1)
         # logits2_softmax = tf.nn.softmax(logits2)
-        desc_imp = tf.Variable(tf.constant(0.5))
+        desc_imp = tf.constant(0.5)
+
+        logits_combine = tf.concat([logits1, logits2], -1)
+        logits_combine = tf.contrib.layers.fully_connected(logits_combine,
+                                                           self.params['num_targets'],
+                                                           activation_fn=tf.nn.relu)
+        logits_combine = tf.nn.l2_normalize(logits_combine, dim=-1)
 
         # logits1 = tf.contrib.layers.fully_connected(logits1, self.params['num_targets'], activation_fn=tf.nn.tanh)
         # logits2 = tf.contrib.layers.fully_connected(logits2, self.params['num_targets'], activation_fn=tf.nn.tanh)
@@ -318,8 +324,8 @@ class PretrainFastTextClassifier:
         # domain_imp = tf.contrib.layers.fully_connected(logits2, 1, activation_fn=tf.nn.sigmoid)
 
 
-        logits_combine = tf.add(tf.multiply(desc_imp, logits1),
-                                tf.multiply(tf.subtract(tf.constant(1.0), desc_imp), logits2))
+        # logits_combine = tf.add(tf.multiply(desc_imp, logits1),
+        #                         tf.multiply(tf.subtract(tf.constant(1.0), desc_imp), logits2))
 
         # logits_combine = tf.multiply(logits1, logits2)
 
