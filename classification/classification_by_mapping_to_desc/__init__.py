@@ -1,15 +1,35 @@
 import tensorflow as tf
-w = tf.Variable(tf.random_uniform([], minval=0.0, maxval=1.0))
-w1 = tf.subtract(tf.constant(1.0), w)
-x = tf.constant([[1.0, 1.5, 2.0], [2.0, 1.5, 1.0]])
+import numpy as np
 
-s = tf.reshape(tf.reduce_sum(x, axis=1), (-1, 1))
-a = tf.divide(x, s)
+tf.InteractiveSession()
 
-init = tf.global_variables_initializer()
+x1 = tf.constant([[1.0, 1.5, 2.0], [2.0, 1.5, 1.0]])
+x2 = tf.constant([[2.0, 2.5, 3.0], [3.0, 2.5, 3.0]])
+
+x12product = tf.multiply(x1, x2).eval()
+
+x12 = tf.stack([x1, x2, x12product], axis=-1)  # 【None， target， 2]
+
+# x12 = tf.concat([x12, x12product], axis=-1)
+
+print(x12.eval())
+
+# w = tf.truncated_normal([3, 2], stddev=0.1)  # [2, target]
+w = tf.constant([[[1.0, 2.0, 3.0], [2.0, 3.0, 4.0], [3.0, 4.0, 5.0]]])
+x12w = tf.multiply(x12, w)
+print(x12w.eval())
+print(tf.reduce_sum(x12w, axis=-1).eval())
 
 
-with tf.Session() as sess:
-    init.run()
-    print(s.eval())
-    print(type(a.eval()))
+
+# a = tf.truncated_normal([2, 2, 3], stddev=0.1)
+# b = tf.truncated_normal([2, 3, 2], stddev=0.1)
+# c = tf.matmul(a, b)
+# print(c.eval())
+
+# def some_function(tensor):
+#   return tf.reduce_sum(tensor, -1)
+#
+# a = tf.stack([x1, x2], axis=1)
+# d = tf.map_fn(some_function, a, dtype=tf.float32)
+
