@@ -304,6 +304,14 @@ class PretrainFastTextClassifier:
         # logits2_softmax = tf.nn.softmax(logits2)
         desc_imp = tf.constant(0.5)
 
+        # logits_product = tf.multiply(logits1, logits2)
+        logits_stack = tf.stack([logits1, logits2], axis=-1)  # [None, target, 3]
+
+        w = tf.Variable(tf.truncated_normal([1, self.params['num_targets'], 2], stddev=0.1))  # [2, target]
+
+        logits_combine =  tf.reduce_sum(tf.multiply(logits_stack, w), axis=-1)
+
+
         # logits_combine = tf.concat([logits1, logits2], -1)
         # logits_combine = tf.contrib.layers.fully_connected(logits_combine,
         #                                                    self.params['num_targets'],
