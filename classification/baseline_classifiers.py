@@ -8,6 +8,7 @@ from _collections import defaultdict
 from string import punctuation
 from random import shuffle
 from sklearn.metrics import accuracy_score
+from sklearn.feature_extraction import FeatureHasher
 from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
 from sklearn.svm import LinearSVC, SVC
 from sklearn.metrics import precision_recall_fscore_support
@@ -90,62 +91,61 @@ class BaselineClassifier:
         y_new = numpy.array(y)[nonzero_indices.tolist()]
         return X[nonzero_indices], y_new
 
+    def load_domains(self, filename):
+        domains = pickle.load(open(OUTPUT_DIR + filename, 'rb'))
+        domains = [d for cat_domains in domains for d in cat_domains]
+        return domains
 
-    def buildXY(self, token='word'):
-        """ Loading Training Data """
-        X_train = []
-        y_train = []
-        training_domains = pickle.load(open(OUTPUT_DIR + 'training_domains_%s.list' % DATASET, 'rb'))
-        training_domains = [d for cat_domains in training_domains for d in cat_domains]
-        shuffle(training_domains)
-        for domain in training_domains:
+    def get_XY(self, token, desc, filename):
+        domains = self.load_domains(filename)
+        shuffle(domains)
+        X = []
+        y = []
+        for domain in domains:
             if token == 'char-ngram':
-                X_train.append(' '.join(self.features('.'.join([domain['domain'], domain['suffix']]))))
+                x = '.'.join([domain['domain'], domain['suffix']])
+                if desc:
+                    x = ' '.join([x] + domain['tokenized_desc'])
+                X.append(' '.join(self.features(x)))
             elif token == 'word':
-                X_train.append(' '.join(domain['segmented_domain']))
-            y_train.append(domain['target'])
+                x = ' '.join(domain['segmented_domain'])
+                if desc:
+                    x = ' '.join([x] + domain['tokenized_desc'])
+                X.append(x)
+
+            y.append(domain['target'])
+        return X, y
+
+    def evaluate(self, X, y, vectorizer):
+        X = vectorizer.transform(X)
+        print("X has been transformed")
+        total_size = X.shape[0]
+        X, y = self.testcases_with_nonzero_vectors(X, y)
+        actual_size = X.shape[0]
+        print(actual_size, "out of", total_size, "examples have non-zero feature vectors")
+        return X, y
 
 
-        """ Fit and transform X and Y """
-        vectorizer = TfidfVectorizer(sublinear_tf=True)
+    def buildXY(self, token='word', desc=False):
+        hasher = FeatureHasher(n_features=100000)
+
+        print("Loading Training Data...")
+        X_train, y_train = self.get_XY(token, desc, 'training_domains_%s.list' % DATASET)
+
+        print("Fitting and transforming X and Y")
+        vectorizer = TfidfVectorizer(sublinear_tf=True, min_df=5)
         X_train = vectorizer.fit_transform(X_train) # return term-document matrix
         print(X_train.shape[0], "training examples and", X_train.shape[1], "features")
 
-        """ Loading Validation Data """
-        X_val = []
-        y_val = []
-        val_domains = pickle.load(open(OUTPUT_DIR + 'validation_domains_%s.list' % DATASET, 'rb'))
-        val_domains = [d for cat_domains in val_domains for d in cat_domains]
-        for domain in val_domains:
-            if token == 'char-ngram':
-                X_val.append(' '.join(self.features('.'.join([domain['domain'], domain['suffix']]))))
-            elif token == 'word':
-                X_val.append(' '.join(domain['segmented_domain']))
-            y_val.append(domain['target'])
-        X_val = vectorizer.transform(X_val)
-        print("X_val has been transformed")
-        total_val_size = X_val.shape[0]
-        X_val, y_val = self.testcases_with_nonzero_vectors(X_val, y_val)
-        actual_val_size = X_val.shape[0]
-        print(actual_val_size, "out of", total_val_size, "val examples have non-zero feature vectors")
 
-        """ Loading Test Data """
-        X_test = []
-        y_test = []
-        test_domains = pickle.load(open(OUTPUT_DIR + 'test_domains_%s.list' % DATASET, 'rb'))
-        test_domains = [d for cat_domains in test_domains for d in cat_domains]
-        for domain in test_domains:
-            if token == 'char-ngram':
-                X_test.append(' '.join(self.features('.'.join([domain['domain'], domain['suffix']]))))
-            elif token == 'word':
-                X_test.append(' '.join(domain['segmented_domain']))
-            y_test.append(domain['target'])
-        X_test = vectorizer.transform(X_test)
-        print("X_test has been transformed")
-        total_test_size = X_test.shape[0]
-        X_test, y_test = self.testcases_with_nonzero_vectors(X_test, y_test)
-        actual_test_size = X_test.shape[0]
-        print(actual_test_size, "out of", total_test_size, "test examples have non-zero feature vectors")
+        print("Loading Validation Data...")
+        X_val, y_val = self.get_XY(token, desc, 'validation_domains_%s.list' % DATASET)
+        X_val, y_val = self.evaluate(X_val, y_val, vectorizer)
+
+
+        print("Loading Test Data...")
+        X_test, y_test = self.get_XY(token, desc, 'test_domains_%s.list' % DATASET)
+        X_test, y_test = self.evaluate(X_test, y_test, vectorizer)
 
         return X_train, y_train, X_val, y_val, X_test, y_test
 
@@ -204,52 +204,32 @@ class BaselineClassifier:
         print(cv_res)
     '''
 
+    def cal_metrics(self, clf, X, y):
+        y_pred = clf.predict(X)
+        precision, recall, fscore, support = precision_recall_fscore_support(y, y_pred,
+                                                                                 average=None)
+        for p, r, f, s in zip(precision, recall, fscore, support):
+            print(p, r, f, s)
+
+        precision, recall, fscore, _ = precision_recall_fscore_support(y, y_pred,
+                                                                          average='macro')
+        print("Precision (macro): %.4f, Recall (macro): %.4f, F-score (macro): %.4f" % (precision, recall, fscore))
+        print("Accuracy: %.4f" % accuracy_score(y_train, y_pred))
+
     def get_detailed_evalRes(self, clf, X_train, y_train, X_val, y_val, X_test, y_test):
 
         clf.fit(X_train, y_train)
 
         # TEST overfitting
         print("\nPerformance on Training Data")
-        y_pred_train = clf.predict(X_train)
-        precision0, recall0, fscore0, support0 = precision_recall_fscore_support(y_train, y_pred_train,
-                                                                          average=None)
-        for p, r, f, s in zip(precision0, recall0, fscore0, support0):
-            print(p, r, f, s)
-
-        precision0, recall0, fscore0, _ = precision_recall_fscore_support(y_train, y_pred_train,
-                                                                          average='macro')
-        print("Precision (macro): %.4f, Recall (macro): %.4f, F-score (macro): %.4f" % (precision0, recall0, fscore0))
-        print("Accuracy: %.4f" % accuracy_score(y_train, y_pred_train))
-
+        self.cal_metrics(clf, X_train, y_train)
 
 
         print("\nPerformance on Validation Data")
-        y_pred_val = clf.predict(X_val)
-        precision, recall, fscore, support = precision_recall_fscore_support(y_val, y_pred_val,
-                                                                             average=None)
-        for p, r, f, s in zip(precision, recall, fscore, support):
-            print(p, r, f, s)
-
-        precision, recall, fscore, _ = precision_recall_fscore_support(y_val, y_pred_val,
-                                                                       average='macro')
-        print("Precision (macro): %.4f, Recall (macro): %.4f, F-score (macro): %.4f" % (precision, recall, fscore))
-        print("Accuracy: %.4f" % accuracy_score(y_val, y_pred_val))
-
-
+        self.cal_metrics(clf, X_val, y_val)
 
         print("\nPerformance on Test Data")
-        y_pred_test = clf.predict(X_test)
-        precision, recall, fscore, support = precision_recall_fscore_support(y_test, y_pred_test,
-                                                                          average=None)
-        for p, r, f, s in zip(precision, recall, fscore, support):
-            print(p, r, f, s)
-
-        precision, recall, fscore, _ = precision_recall_fscore_support(y_test, y_pred_test,
-                                                                             average='macro')
-        print("Precision (macro): %.4f, Recall (macro): %.4f, F-score (macro): %.4f" % (precision, recall, fscore))
-        print("Accuracy: %.4f" % accuracy_score(y_test, y_pred_test))
-
-        return precision, recall, fscore, support
+        self.cal_metrics(clf, X_test, y_test)
 
 
 
@@ -259,7 +239,7 @@ if __name__ == '__main__':
     token='char-ngram': Baykan2011-based method
     token='word': simple segment-based method
     '''
-    X_train, y_train, X_val, y_val, X_test, y_test = classifier.buildXY(token='char-ngram')
+    X_train, y_train, X_val, y_val, X_test, y_test = classifier.buildXY(token='char-ngram', desc=True)
 
     clf = LinearSVC(C=0.1, penalty='l2', verbose=0)
     classifier.get_detailed_evalRes(clf, X_train, y_train, X_val, y_val, X_test, y_test)
