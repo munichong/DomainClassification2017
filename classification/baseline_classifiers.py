@@ -139,12 +139,12 @@ class BaselineClassifier:
 
 
         print("Loading Validation Data...")
-        X_val, y_val = self.get_XY(token, desc, 'validation_domains_%s.list' % DATASET)
+        X_val, y_val = self.get_XY(token, False, 'validation_domains_%s.list' % DATASET)
         X_val, y_val = self.evaluate(X_val, y_val, vectorizer)
 
 
         print("Loading Test Data...")
-        X_test, y_test = self.get_XY(token, desc, 'test_domains_%s.list' % DATASET)
+        X_test, y_test = self.get_XY(token, False, 'test_domains_%s.list' % DATASET)
         X_test, y_test = self.evaluate(X_test, y_test, vectorizer)
 
         return X_train, y_train, X_val, y_val, X_test, y_test
@@ -214,7 +214,7 @@ class BaselineClassifier:
         precision, recall, fscore, _ = precision_recall_fscore_support(y, y_pred,
                                                                           average='macro')
         print("Precision (macro): %.4f, Recall (macro): %.4f, F-score (macro): %.4f" % (precision, recall, fscore))
-        print("Accuracy: %.4f" % accuracy_score(y_train, y_pred))
+        print("Accuracy: %.4f" % accuracy_score(y, y_pred))
 
     def get_detailed_evalRes(self, clf, X_train, y_train, X_val, y_val, X_test, y_test):
 
@@ -239,7 +239,7 @@ if __name__ == '__main__':
     token='char-ngram': Baykan2011-based method
     token='word': simple segment-based method
     '''
-    X_train, y_train, X_val, y_val, X_test, y_test = classifier.buildXY(token='char-ngram', desc=True)
+    X_train, y_train, X_val, y_val, X_test, y_test = classifier.buildXY(token='char-ngram', desc=False)
 
-    clf = LinearSVC(C=0.1, penalty='l2', verbose=0)
+    clf = LinearSVC(C=0.08, penalty='l2', verbose=0)
     classifier.get_detailed_evalRes(clf, X_train, y_train, X_val, y_val, X_test, y_test)
