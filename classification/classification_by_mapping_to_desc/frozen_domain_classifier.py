@@ -69,6 +69,14 @@ class PretrainFastTextClassifier:
         self.domains_test = [d for cat_domains in self.domains_test for d in cat_domains]
         print(len(self.domains_train), len(self.domains_val), len(self.domains_test))
 
+        # ''' load data '''
+        # self.domains_train = pickle.load(open(OUTPUT_DIR + 'training_domains_%s.list' % DATASET, 'rb'))
+        # self.domains_train = [d for cat_domains in self.domains_train for d in cat_domains]
+        # self.domains_val = pickle.load(open(OUTPUT_DIR + 'validation_domains_%s.list' % DATASET, 'rb'))
+        # self.domains_val = [d for cat_domains in self.domains_val for d in cat_domains]
+        # self.domains_test = pickle.load(open(OUTPUT_DIR + 'test_domains_%s.list' % DATASET, 'rb'))
+        # self.domains_test = [d for cat_domains in self.domains_test for d in cat_domains]
+
         ''' load params '''
         self.params = json.load(open(OUTPUT_DIR + 'params_%s.json' % DATASET))
 

@@ -135,6 +135,9 @@ class PretrainFastTextClassifier:
                 # print("logits_softmax2:")
                 # print(batch_logsoft2)
 
+
+            print("%.1f%%: desc_imp > domain_imp" % (sum( a > b for a, b in zip(batch_desc_imp, batch_domain_imp)) / len(batch_domain_imp) * 100))
+
             desc_imp = batch_domain_imp
             # domain_imp =batch_domain_imp
 
@@ -272,14 +275,14 @@ class PretrainFastTextClassifier:
             h_pool = tf.concat(pooled_outputs, axis=3)
             num_filters_total = num_filters * len(filter_sizes)
             domain_vec_cnn3 = tf.reshape(h_pool, [-1, num_filters_total])
-            # domain_vec_cnn3 = tf.nn.l2_normalize(domain_vec_cnn3, dim=-1)
+            domain_vec_cnn3 = tf.nn.l2_normalize(domain_vec_cnn3, dim=-1)
 
         logits_weight = domain_vec_cnn3
         # for _ in range(n_fc_layers):
         #     logits_weight = tf.contrib.layers.fully_connected(logits_weight, num_outputs=n_rnn_neurons, activation_fn=act_fn)
         #     logits_weight = tf.layers.dropout(logits_weight, dropout_rate)
 
-        logits_weight = tf.concat([logits1, logits2], -1)
+        # logits_weight = tf.concat([logits1, logits2], -1)
 
         imp = tf.contrib.layers.fully_connected(logits_weight, 2, activation_fn=tf.nn.softmax)
         # domain_imp = domain_imp.transpose()
