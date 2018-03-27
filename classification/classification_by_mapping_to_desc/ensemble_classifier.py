@@ -30,8 +30,8 @@ n_fc_layers= 3
 act_fn = tf.nn.relu
 
 n_epochs = 60
-batch_size = 2000
-lr_rate = 0.001
+batch_size = 4000
+lr_rate = 0.0001
 
 
 OUTPUT_DIR = '../../Output/'
@@ -160,6 +160,7 @@ class PretrainFastTextClassifier:
                                  shape=[None, self.params['max_domain_segments_len'], embed_dimen],
                                  name='embedding')
 
+
         # print(x_embed.get_shape())
         x_suffix = tf.placeholder(tf.float32,
                                   shape=[None, self.params['num_suffix']],
@@ -254,13 +255,15 @@ class PretrainFastTextClassifier:
         saver_domain = tf.train.Saver([v for v in tf.all_variables() if 'domain_cnn' in v.name])
 
 
+        num_filter_weighting = 3000
+        num_fclayer_width_weighting = 1000
         with tf.variable_scope('combine_weighting'):
             pooled_outputs = []
             for filter_size in filter_sizes:
                 # Define and initialize filters
-                filter_shape = [filter_size, embed_dimen, 1, num_filters]
+                filter_shape = [filter_size, embed_dimen, 1, num_filter_weighting]
                 W_filter = tf.Variable(tf.truncated_normal(filter_shape, stddev=0.1)) # initialize the filters' weights
-                b_filter = tf.Variable(tf.constant(0.1, shape=[num_filters]))  # initialize the filters' biases
+                b_filter = tf.Variable(tf.constant(0.1, shape=[num_filter_weighting]))  # initialize the filters' biases
                 # The conv2d operation expects a 4-D tensor with dimensions corresponding to batch, width, height and channel.
                 # The result of our embedding doesn’t contain the channel dimension
                 # So we add it manually, leaving us with a layer of shape [None, sequence_length, embedding_size, 1].
@@ -273,14 +276,14 @@ class PretrainFastTextClassifier:
                 pooled_outputs.append(pooled)
             # Combine all the pooled features
             h_pool = tf.concat(pooled_outputs, axis=3)
-            num_filters_total = num_filters * len(filter_sizes)
+            num_filters_total = num_filter_weighting * len(filter_sizes)
             domain_vec_cnn3 = tf.reshape(h_pool, [-1, num_filters_total])
             domain_vec_cnn3 = tf.nn.l2_normalize(domain_vec_cnn3, dim=-1)
 
         logits_weight = domain_vec_cnn3
-        # for _ in range(n_fc_layers):
-        #     logits_weight = tf.contrib.layers.fully_connected(logits_weight, num_outputs=n_rnn_neurons, activation_fn=act_fn)
-        #     logits_weight = tf.layers.dropout(logits_weight, dropout_rate)
+        for _ in range(n_fc_layers):
+            logits_weight = tf.contrib.layers.fully_connected(logits_weight, num_outputs=num_fclayer_width_weighting, activation_fn=act_fn)
+            # logits_weight = tf.layers.dropout(logits_weight, dropout_rate)
 
         # logits_weight = tf.concat([logits1, logits2], -1)
 
@@ -294,7 +297,7 @@ class PretrainFastTextClassifier:
         # desc_imp = tf.Variable(tf.constant(0.0001))
         #
         # logits_combine = tf.add(tf.multiply(domain_imp, tf.nn.softmax(logits2)),
-        #                         tf.multiply(tf.subtract(tf.constant(1.0), domain_imp + desc_imp), tf.nn.softmax(logits1)))
+        #                         tf.multiply(tf.subtract(tf.constant(1.0), tf.divide(desc_imp, desc_imp)), tf.nn.softmax(logits1)))
 
         # logits_combine = tf.reduce_sum(domain_imp * tf.stack([tf.nn.softmax(logits1), tf.nn.softmax(logits2)]), 1)
 
