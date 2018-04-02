@@ -5,7 +5,7 @@ Created on Oct 30, 2017
 '''
 import numpy as np, pickle, json, csv, os
 import tensorflow as tf
-from pprint import pprint
+from collections import defaultdict
 from random import shuffle
 from tabulate import tabulate
 from sklearn.metrics import precision_recall_fscore_support
@@ -13,8 +13,11 @@ from datetime import datetime
 import warnings
 warnings.filterwarnings(action='ignore', category=UserWarning, module='gensim')
 from gensim.models.wrappers import FastText
+from gensim.models.wrappers.fasttext import compute_ngrams
 
 DATASET = 'content'  # 'content' or '2340768'
+
+char_ngram_sizes = [4,5]
 
 type = 'CNN'
 # For RNN
@@ -29,8 +32,8 @@ dropout_rate= 0.2
 n_fc_layers= 3
 act_fn = tf.nn.relu
 
-n_epochs = 60
-batch_size = 4000
+n_epochs = 80
+batch_size = 2000
 lr_rate = 0.0001
 
 
@@ -59,11 +62,26 @@ class PretrainFastTextClassifier:
         self.domains_test = pickle.load(open(OUTPUT_DIR + 'test_domains_%s.list' % DATASET, 'rb'))
         self.domains_test = [d for cat_domains in self.domains_test for d in cat_domains]
 
+        self.charngram2index = defaultdict(int)  # index starts from 1. 0 is for padding
+        for domains in (self.domains_train, self.domains_val, self.domains_test):
+            for domain in domains:
+                for word in domain['segmented_domain']:
+
+                    for ngram in compute_ngrams(word, *char_ngram_sizes):
+                        if ngram in self.charngram2index:
+                            continue
+                        self.charngram2index[ngram] = len(self.charngram2index) + 1
+
         ''' load params '''
         self.params = json.load(open(OUTPUT_DIR + 'params_%s.json' % DATASET))
+        self.params['max_segment_char_len'] += 2  # because '<' and '>'are appended to each word
+        # the word itself is also added, thus: sum(...) + 1
+        self.max_num_charngrams = len(
+            compute_ngrams(''.join(['a'] * self.params['max_segment_char_len']), *char_ngram_sizes))
 
     def next_batch(self, domains, batch_size=batch_size):
         X_batch_embed = []
+        X_batch_weighting = []
         X_batch_suf = []
         domain_actual_lens = []
         y_batch = []
@@ -81,17 +99,30 @@ class PretrainFastTextClassifier:
                 # X_batch_embed.append(tf.pad(embeds, paddings=[[0, n_extra_padding],[0,0]], mode="CONSTANT"))
                 X_batch_embed.append(embeds)
 
+
+                embeds_weighting = []  # [[1,2,5,0,0], [35,3,7,8,4], ...]
+                for word in domains[i]['segmented_domain']:
+                    embeds_weighting.append([self.charngram2index[ngram] for ngram in compute_ngrams(word, *char_ngram_sizes)])
+                ''' padding '''
+                # pad char-ngram level
+                embeds_weighting = [indices + [0] * (self.max_num_charngrams - len(indices)) for indices in embeds_weighting]
+                embeds_weighting += [[0] * self.max_num_charngrams for _ in
+                           range(self.params['max_domain_segments_len'] - len(embeds_weighting))]
+                X_batch_weighting.append(embeds_weighting)
+
+
                 one_hot_suf = np.zeros(self.params['num_suffix'])
                 one_hot_suf[domains[i]['suffix_indices']] = 1.0 / len(domains[i]['suffix_indices'])
                 X_batch_suf.append(one_hot_suf)
 
                 y_batch.append(domains[i]['target'])
-            yield np.array(X_batch_embed), np.array(domain_actual_lens), np.array(X_batch_suf), \
+            yield np.array(X_batch_embed), np.array(X_batch_weighting), np.array(domain_actual_lens), np.array(X_batch_suf), \
                   np.array(y_batch)
 
             # print(sample_weights)
 
             X_batch_embed.clear()
+            X_batch_weighting.clear()
             domain_actual_lens.clear()
             X_batch_suf.clear()
             y_batch.clear()
@@ -106,12 +137,13 @@ class PretrainFastTextClassifier:
         n_batch = 0
         desc_imp = None
         domain_imp = None
-        for X_batch_embed, domain_actual_lens, X_batch_suf, y_batch in self.next_batch(data):
+        for X_batch_embed, X_batch_weighting, domain_actual_lens, X_batch_suf, y_batch in self.next_batch(data):
             batch_correct, batch_loss, batch_bool, batch_pred, \
             batch_desc_imp, batch_domain_imp, batch_log1, batch_log2  = session.run(eval_nodes,
                                                          feed_dict={
                                                                     'bool_train:0': False,
                                                                     'embedding:0': X_batch_embed,
+                                                                    'indices:0': X_batch_weighting,
                                                                     'suffix:0': X_batch_suf,
                                                                     'length:0': domain_actual_lens,
                                                                     'target:0': y_batch})
@@ -160,6 +192,18 @@ class PretrainFastTextClassifier:
                                  shape=[None, self.params['max_domain_segments_len'], embed_dimen],
                                  name='embedding')
 
+        x_indices = tf.placeholder(tf.int32,
+                                 shape=[None, self.params['max_domain_segments_len'],
+                                        self.max_num_charngrams],
+                                 name='indices')
+
+        embed_dimen_weighting = 300
+        num_filter_weighting = 1024
+        num_fclayer_width_weighting = 512
+
+        embeddings = tf.Variable(tf.random_uniform([len(self.charngram2index), embed_dimen_weighting], -1.0, 1.0))
+        x_embed_weighting = tf.nn.embedding_lookup(embeddings, x_indices)
+        x_embed_weighting = tf.reduce_mean(x_embed_weighting, 2)
 
         # print(x_embed.get_shape())
         x_suffix = tf.placeholder(tf.float32,
@@ -255,19 +299,18 @@ class PretrainFastTextClassifier:
         saver_domain = tf.train.Saver([v for v in tf.all_variables() if 'domain_cnn' in v.name])
 
 
-        num_filter_weighting = 3000
-        num_fclayer_width_weighting = 1000
+
         with tf.variable_scope('combine_weighting'):
             pooled_outputs = []
             for filter_size in filter_sizes:
                 # Define and initialize filters
-                filter_shape = [filter_size, embed_dimen, 1, num_filter_weighting]
+                filter_shape = [filter_size, embed_dimen_weighting, 1, num_filter_weighting]
                 W_filter = tf.Variable(tf.truncated_normal(filter_shape, stddev=0.1)) # initialize the filters' weights
                 b_filter = tf.Variable(tf.constant(0.1, shape=[num_filter_weighting]))  # initialize the filters' biases
                 # The conv2d operation expects a 4-D tensor with dimensions corresponding to batch, width, height and channel.
                 # The result of our embedding doesn’t contain the channel dimension
                 # So we add it manually, leaving us with a layer of shape [None, sequence_length, embedding_size, 1].
-                x_embed_expanded = tf.expand_dims(x_embed, -1)
+                x_embed_expanded = tf.expand_dims(x_embed_weighting, -1)
                 conv = tf.nn.conv2d(x_embed_expanded, W_filter, strides=[1, 1, 1, 1], padding="VALID")
                 # Apply nonlinearity
                 h = tf.nn.relu(tf.nn.bias_add(conv, b_filter), name="relu")
@@ -293,6 +336,7 @@ class PretrainFastTextClassifier:
 
         desc_imp, domain_imp = tf.unstack(imp, axis=1)
         logits_combine = tf.reshape(desc_imp, [-1,1]) * tf.nn.softmax(logits1) + tf.reshape(domain_imp, [-1,1]) * tf.nn.softmax(logits2)
+        # logits_combine = tf.reshape(desc_imp, [-1, 1]) * logits1 + tf.reshape(domain_imp, [-1, 1]) * logits2
         # domain_imp = tf.constant(0.99999)
         # desc_imp = tf.Variable(tf.constant(0.0001))
         #
@@ -301,14 +345,15 @@ class PretrainFastTextClassifier:
 
         # logits_combine = tf.reduce_sum(domain_imp * tf.stack([tf.nn.softmax(logits1), tf.nn.softmax(logits2)]), 1)
 
-        # crossentropy = tf.reduce_mean(-tf.reduce_sum(tf.one_hot(y, self.params['num_targets']) * tf.log(logits_combine), [1]))
+        crossentropy = tf.reduce_mean(-tf.reduce_sum(tf.one_hot(y, self.params['num_targets']) * tf.log(logits_combine), [1]))
+
 
         # logits_combine = tf.concat([logits1, logits2], -1)
         # logits_combine = tf.contrib.layers.fully_connected(logits_combine,
         #                                                    self.params['num_targets'],
         #                                                    activation_fn=tf.nn.relu)
 
-        crossentropy = tf.losses.sparse_softmax_cross_entropy(labels=y, logits=logits_combine)
+        # crossentropy = tf.losses.sparse_softmax_cross_entropy(labels=y, logits=logits_combine)
 
 
         loss_mean = tf.reduce_mean(crossentropy)
@@ -335,11 +380,12 @@ class PretrainFastTextClassifier:
             for epoch in range(1, n_epochs + 1):
                 # model training
                 n_batch = 0
-                for X_batch_embed, domain_actual_lens, X_batch_suf, y_batch in self.next_batch(self.domains_train):
+                for X_batch_embed, X_batch_weighting, domain_actual_lens, X_batch_suf, y_batch in self.next_batch(self.domains_train):
                     _, acc_batch_train, loss_batch_train, prediction_train = sess.run([training_op, accuracy, loss_mean, prediction],
                                                                     feed_dict={
                                                                                'bool_train:0': True,
                                                                                'embedding:0': X_batch_embed,
+                                                                               'indices:0': X_batch_weighting,
                                                                                'suffix:0': X_batch_suf,
                                                                                'length:0': domain_actual_lens,
                                                                                'target:0': y_batch})
