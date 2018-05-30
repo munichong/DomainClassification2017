@@ -25,12 +25,12 @@ num_filters = 512
 
 embed_dimen = 300
 # n_fc_neurons = 64
-dropout_rate= 0.2
+dropout_rate= 0.3
 n_fc_layers= 3
 act_fn = tf.nn.relu
 
 n_epochs = 50
-batch_size = 4000
+batch_size = 2000
 lr_rate = 0.001
 
 class_weighted = False

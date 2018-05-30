@@ -3,7 +3,7 @@ Created on Oct 26, 2017
 
 @author: munichong
 '''
-import csv, pickle
+import csv, pickle, re
 import json
 from tldextract import extract
 from wordsegment import load, segment
@@ -33,6 +33,19 @@ with open(DMOZ_PATH, encoding='utf-8') as infile:
             output_table[raw_domain] = {}
             continue
 
+        # raw_domain = 'http://mikegrost.com/strange.htm'
+        tld = extract(raw_domain)
+        subdomain, domain, suffix = tld.subdomain, tld.domain, tld.suffix
+        # domain = '.'.join([tld.subdomain, tld.domain])
+        # print(tld.subdomain, tld.domain)
+
+        # Remove domains with subdomains such as "http://bakery.cdkitchen.com/"
+        # Do not remove domains such as "http://mikegrost.com/"
+        if (subdomain and subdomain[:3] != 'www') and len(re.findall('(?=\.)', raw_domain)) > 1:
+            # print(raw_domain)
+            output_table[raw_domain] = {}
+            continue
+
         url_seg = urlparse(raw_domain)
         if url_seg.path != '/' or url_seg.query or url_seg.fragment:
             output_table[raw_domain] = {}
@@ -40,13 +53,6 @@ with open(DMOZ_PATH, encoding='utf-8') as infile:
 
         category_path = line[1].split('/')
         desc = ' '.join(line[2:]).replace(',', ' ')
-
-
-        tld = extract(raw_domain)
-        suffix = tld.suffix
-        # domain = '.'.join([tld.subdomain, tld.domain])
-        domain = tld.domain
-        # print(tld.subdomain, tld.domain)
 
         output_table[raw_domain] = {
                                      'categories': category_path,
