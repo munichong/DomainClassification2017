@@ -10,13 +10,13 @@ from collections import Counter, defaultdict
 
 DATASET = 'content'  # 'content' or '2340768'
 
-TRANS_DMOZ_PATH = '../DMOZ/transformed_%s.json' % DATASET
+TRANS_DMOZ_PATH = '../DMOZ/transformed_%s.pkl' % DATASET
 
 OUTPUT_DIR = '../Output/'
-TRAIN_PCT = 0.8
+TRAIN_PCT = 0.9
 
 
-json_data = json.load(open(TRANS_DMOZ_PATH))
+pkl_data = pickle.load(open(TRANS_DMOZ_PATH, 'rb'))
 
 
 """Group the domains that belong to the same categories. """
@@ -29,10 +29,10 @@ desc_words_len_dist = Counter()
 max_segment_char_len = 0
 max_desc_words_len = 0
 
-for full_domain in json_data:
+for full_domain in pkl_data:
 
     ''' processing target category '''
-    second_category = json_data[full_domain]['categories'][1]
+    second_category = pkl_data[full_domain]['categories'][1]
     if second_category == 'World' or second_category == 'Regional':
         continue
 
@@ -40,11 +40,11 @@ for full_domain in json_data:
         category2index[second_category] = len(category2index) # class index starts from 0
         category_domains.append([])
     target = category2index[second_category]
-    json_data[full_domain]['target'] = target
+    pkl_data[full_domain]['target'] = target
 
 
     ''' processing suffix '''
-    seg_suffix = json_data[full_domain]['segmented_suffix']
+    seg_suffix = pkl_data[full_domain]['segmented_suffix']
 
     suffix_indices = []
     for suffix in seg_suffix:
@@ -53,19 +53,19 @@ for full_domain in json_data:
         suffix_indices.append(suffix2index[suffix])
         suffix_dist[suffix] += 1
 
-    json_data[full_domain]['suffix_indices'] = suffix_indices
+    pkl_data[full_domain]['suffix_indices'] = suffix_indices
 
 
-    max_desc_words_len = max(max_desc_words_len, len(json_data[full_domain]['tokenized_desc']))
-    desc_words_len_dist[len(json_data[full_domain]['tokenized_desc'])] += 1
+    max_desc_words_len = max(max_desc_words_len, len(pkl_data[full_domain]['tokenized_desc']))
+    desc_words_len_dist[len(pkl_data[full_domain]['tokenized_desc'])] += 1
 
 
     # record the length of the segmented domain
-    domain_segments_len_dist[len(json_data[full_domain]['segmented_domain'])] += 1
+    domain_segments_len_dist[len(pkl_data[full_domain]['segmented_domain'])] += 1
 
-    max_segment_char_len = max([max_segment_char_len, max(len(segment) for segment in json_data[full_domain]['segmented_domain'])])
+    max_segment_char_len = max([max_segment_char_len, max(len(segment) for segment in pkl_data[full_domain]['segmented_domain'])])
 
-    category_domains[target].append(json_data[full_domain])
+    category_domains[target].append(pkl_data[full_domain])
 
 
 

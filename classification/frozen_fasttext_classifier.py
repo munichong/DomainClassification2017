@@ -29,7 +29,7 @@ dropout_rate= 0.2
 n_fc_layers= 3
 act_fn = tf.nn.relu
 
-n_epochs = 80
+n_epochs = 50
 batch_size = 4000
 lr_rate = 0.001
 
@@ -257,7 +257,7 @@ class PretrainFastTextClassifier:
         with tf.Session() as sess:
             init.run()
             n_total_batches = int(np.ceil(len(self.domains_train) / batch_size))
-            test_fscore_history = []
+            val_fscore_history = []
             for epoch in range(1, n_epochs + 1):
                 # model training
                 n_batch = 0
@@ -287,7 +287,7 @@ class PretrainFastTextClassifier:
                       % (loss_train, acc_train))
 
                 # evaluation on validation data
-                loss_val, acc_val, _, _ = self.evaluate(self.domains_val, sess, eval_nodes)
+                loss_val, acc_val, is_correct_val, pred_val = self.evaluate(self.domains_val, sess, eval_nodes)
                 print("*** On Validation Set:\tloss = %.6f\taccuracy = %.4f"
                       % (loss_val, acc_val))
 
@@ -301,20 +301,20 @@ class PretrainFastTextClassifier:
                 print()
                 print("Macro average:")
                 precisions_macro, recalls_macro, fscores_macro, _ = precision_recall_fscore_support(
-                                              [category2index[domain['categories'][1]] for domain in self.domains_test],
-                                               pred_test, average='macro')
+                                              [category2index[domain['categories'][1]] for domain in self.domains_val],
+                                               pred_val, average='macro')
                 print("Precision (macro): %.4f, Recall (macro): %.4f, F-score (macro): %.4f" %
                       (precisions_macro, recalls_macro, fscores_macro))
                 print()
 
 
 
-                if not test_fscore_history or fscores_macro > max(test_fscore_history):
+                if not val_fscore_history or fscores_macro > max(val_fscore_history):
                     # the accuracy of this epoch is the largest
                     print("Classification Performance on individual classes:")
                     precisions_none, recalls_none, fscores_none, supports_none = precision_recall_fscore_support(
-                        [category2index[domain['categories'][1]] for domain in self.domains_test],
-                        pred_test, average=None)
+                        [category2index[domain['categories'][1]] for domain in self.domains_val],
+                        pred_val, average=None)
                     print(tabulate(zip((categories[i] for i in range(len(precisions_none))),
                                        precisions_none, recalls_none, fscores_none, supports_none),
                                    headers=['category', 'precision', 'recall', 'f-score', 'support'],
@@ -324,14 +324,14 @@ class PretrainFastTextClassifier:
                     with open(os.path.join(OUTPUT_DIR, 'incorrect_predictions.csv'), 'w', newline="\n") as outfile:
                         csv_writer = csv.writer(outfile)
                         csv_writer.writerow(('RAW_DOMAIN', 'SEGMENTED_DOMAIN', 'TRUE_CATEGORY', 'PRED_CATEGORY'))
-                        for correct, pred_catIdx, domain in zip(is_correct_test, pred_test, self.domains_test):
+                        for correct, pred_catIdx, domain in zip(is_correct_val, pred_val, self.domains_test):
                             if correct:
                                 continue
                             csv_writer.writerow((domain['raw_domain'],
                                                  domain['segmented_domain'],
                                                  domain['categories'][1],
                                                  categories[pred_catIdx]))
-                test_fscore_history.append(fscores_macro)
+                    val_fscore_history.append(fscores_macro)
 
 
 

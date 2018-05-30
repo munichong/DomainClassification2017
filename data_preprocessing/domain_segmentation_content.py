@@ -8,7 +8,7 @@ import json
 from tldextract import extract
 from wordsegment import load, segment
 from nltk import word_tokenize
-
+from urllib.parse import urlparse
 
 
 DMOZ_PATH = '../DMOZ/content.csv'
@@ -24,7 +24,8 @@ with open(DMOZ_PATH, encoding='utf-8') as infile:
     for line in csv_reader:
         raw_domain = line[0]
 
-        print(n)
+        if n % 100000 == 0:
+            print(n)
         n += 1
 
         # label duplicate or ambiguous domains
@@ -32,8 +33,14 @@ with open(DMOZ_PATH, encoding='utf-8') as infile:
             output_table[raw_domain] = {}
             continue
 
+        url_seg = urlparse(raw_domain)
+        if url_seg.path != '/' or url_seg.query or url_seg.fragment:
+            output_table[raw_domain] = {}
+            continue
+
         category_path = line[1].split('/')
         desc = ' '.join(line[2:]).replace(',', ' ')
+
 
         tld = extract(raw_domain)
         suffix = tld.suffix
@@ -55,7 +62,8 @@ with open(DMOZ_PATH, encoding='utf-8') as infile:
 num_total_domains = len(output_table)
 filtered_domains = {domain: output_table[domain] for domain in output_table if output_table[domain]}
 num_filtered_domains = len(filtered_domains)
-print('%d (%.4f) domains are duplicate and/or ambiguous' % (num_total_domains - num_filtered_domains,
+print("%d domains will be pickled." % num_filtered_domains)
+print('%d (%.4f) domains are duplicate, non-homepage, and/or ambiguous' % (num_total_domains - num_filtered_domains,
                                                             1 - (num_filtered_domains / num_total_domains)))
 
 pickle.dump(filtered_domains, open(TRANS_DMOZ_PATH, 'wb'))
