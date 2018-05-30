@@ -324,7 +324,7 @@ class PretrainFastTextClassifier:
                     with open(os.path.join(OUTPUT_DIR, 'incorrect_predictions.csv'), 'w', newline="\n") as outfile:
                         csv_writer = csv.writer(outfile)
                         csv_writer.writerow(('RAW_DOMAIN', 'SEGMENTED_DOMAIN', 'TRUE_CATEGORY', 'PRED_CATEGORY'))
-                        for correct, pred_catIdx, domain in zip(is_correct_val, pred_val, self.domains_test):
+                        for correct, pred_catIdx, domain in zip(is_correct_val, pred_val, self.domains_val):
                             if correct:
                                 continue
                             csv_writer.writerow((domain['raw_domain'],
