@@ -33,7 +33,7 @@ with open(DMOZ_PATH, encoding='utf-8') as infile:
             output_table[raw_domain] = {}
             continue
 
-        raw_domain = 'http://www.vital-e.co.uk/'
+        # raw_domain = 'http://www.vital-e.co.uk/'
         tld = extract(raw_domain)
         subdomain, domain, suffix = tld.subdomain, tld.domain, tld.suffix
         # domain = '.'.join([tld.subdomain, tld.domain])
