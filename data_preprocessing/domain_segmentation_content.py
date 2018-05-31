@@ -33,7 +33,7 @@ with open(DMOZ_PATH, encoding='utf-8') as infile:
             output_table[raw_domain] = {}
             continue
 
-        # raw_domain = 'http://www.the401kman.com/'
+        raw_domain = 'http://www.vital-e.co.uk/'
         tld = extract(raw_domain)
         subdomain, domain, suffix = tld.subdomain, tld.domain, tld.suffix
         # domain = '.'.join([tld.subdomain, tld.domain])
@@ -56,6 +56,7 @@ with open(DMOZ_PATH, encoding='utf-8') as infile:
 
         # http://www.e-scanshop.com/ ---> ['e', 'scan', 'shop']
         #                             not ['es', 'can', 'shop']
+        segmented_domain = []
         if '-' in domain:
             for s in domain.split('-'):
                 segmented_domain.extend(segment(s))
@@ -81,4 +82,4 @@ print("%d domains will be pickled." % num_filtered_domains)
 print('%d (%.4f) domains are duplicate, non-homepage, and/or ambiguous' % (num_total_domains - num_filtered_domains,
                                                             1 - (num_filtered_domains / num_total_domains)))
 
-# pickle.dump(filtered_domains, open(TRANS_DMOZ_PATH, 'wb'))
+pickle.dump(filtered_domains, open(TRANS_DMOZ_PATH, 'wb'))

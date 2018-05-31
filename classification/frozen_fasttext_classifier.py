@@ -30,7 +30,7 @@ n_fc_layers= 3
 act_fn = tf.nn.relu
 
 n_epochs = 40
-batch_size = 1000
+batch_size = 256
 lr_rate = 0.001
 
 class_weighted = False
