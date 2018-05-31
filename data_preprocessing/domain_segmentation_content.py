@@ -33,7 +33,7 @@ with open(DMOZ_PATH, encoding='utf-8') as infile:
             output_table[raw_domain] = {}
             continue
 
-        # raw_domain = 'http://mikegrost.com/strange.htm'
+        # raw_domain = 'http://www.mchv.com.au/'
         tld = extract(raw_domain)
         subdomain, domain, suffix = tld.subdomain, tld.domain, tld.suffix
         # domain = '.'.join([tld.subdomain, tld.domain])
@@ -41,7 +41,7 @@ with open(DMOZ_PATH, encoding='utf-8') as infile:
 
         # Remove domains with subdomains such as "http://bakery.cdkitchen.com/"
         # Do not remove domains such as "http://mikegrost.com/"
-        if (subdomain and subdomain[:3] != 'www') and len(re.findall('(?=\.)', raw_domain)) > 1:
+        if (subdomain and subdomain != 'www') and len(re.findall('(?=\.)', raw_domain)) > 1:
             # print(raw_domain)
             output_table[raw_domain] = {}
             continue
