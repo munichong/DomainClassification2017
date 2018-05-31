@@ -33,7 +33,7 @@ with open(DMOZ_PATH, encoding='utf-8') as infile:
             output_table[raw_domain] = {}
             continue
 
-        # raw_domain = 'http://www.mchv.com.au/'
+        raw_domain = 'http://www.the401kman.com/'
         tld = extract(raw_domain)
         subdomain, domain, suffix = tld.subdomain, tld.domain, tld.suffix
         # domain = '.'.join([tld.subdomain, tld.domain])
@@ -54,13 +54,22 @@ with open(DMOZ_PATH, encoding='utf-8') as infile:
         category_path = line[1].split('/')
         desc = ' '.join(line[2:]).replace(',', ' ')
 
+        # http://www.e-scanshop.com/ ---> ['e', 'scan', 'shop']
+        #                             not ['es', 'can', 'shop']
+        if '-' in domain:
+            for s in domain.split('-'):
+                segmented_domain.extend(segment(s))
+        else:
+            segmented_domain = segment(domain) # segment function is slow. Don't use for desc
+
+
         output_table[raw_domain] = {
                                      'categories': category_path,
                                      'raw_domain': raw_domain,
                                      'domain': domain,
                                      'suffix': suffix,
                                      'segmented_suffix': suffix.split('.'),
-                                     'segmented_domain': segment(domain),  # segment function is slow. Don't use for desc
+                                     'segmented_domain': segmented_domain,
                                      'tokenized_desc': word_tokenize(desc)
                                      }
 
@@ -72,4 +81,4 @@ print("%d domains will be pickled." % num_filtered_domains)
 print('%d (%.4f) domains are duplicate, non-homepage, and/or ambiguous' % (num_total_domains - num_filtered_domains,
                                                             1 - (num_filtered_domains / num_total_domains)))
 
-pickle.dump(filtered_domains, open(TRANS_DMOZ_PATH, 'wb'))
+# pickle.dump(filtered_domains, open(TRANS_DMOZ_PATH, 'wb'))
