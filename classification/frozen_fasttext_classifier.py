@@ -335,6 +335,18 @@ class PretrainFastTextClassifier:
 
 
 
+                    # output all prediction
+                    with open(os.path.join(OUTPUT_DIR, 'all_predictions_frozen.csv'), 'w', newline="\n") as outfile:
+                        csv_writer = csv.writer(outfile)
+                        csv_writer.writerow(('RAW_DOMAIN', 'SEGMENTED_DOMAIN', 'TRUE_CATEGORY', 'PRED_CATEGORY'))
+                        for correct, pred_catIdx, domain in zip(is_correct_val, pred_val, self.domains_val):
+                            csv_writer.writerow((domain['raw_domain'],
+                                                 domain['segmented_domain'],
+                                                 domain['categories'][1],
+                                                 categories[pred_catIdx]))
+
+
+
 
 if __name__ == '__main__':
     classifier = PretrainFastTextClassifier()
