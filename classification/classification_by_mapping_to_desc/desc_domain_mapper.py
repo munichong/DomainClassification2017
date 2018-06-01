@@ -48,11 +48,14 @@ print(categories)
 
 # Creating the model
 print("Loading the FastText Model")
+
+
+
 # en_model = {"test":np.array([0]*300)}
 en_model = FastText.load_fasttext_format('../../FastText/wiki.en/wiki.en')
 
 
-domain2logits = pickle.load(open('domain2logits_logits_pred_relu.dict', 'rb'))
+domain2logits = pickle.load(open('domain2logits.dict', 'rb'))
 
 
 class DescDomainMapper:

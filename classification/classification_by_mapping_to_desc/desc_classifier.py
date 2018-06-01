@@ -24,7 +24,7 @@ num_filters = 512
 
 embed_dimen = 300
 # n_fc_neurons = 64
-dropout_rate= 0.2
+dropout_rate= 0.5
 n_fc_neurons = 300
 n_fc_layers= 3
 act_fn = tf.nn.relu
@@ -32,7 +32,7 @@ act_fn = tf.nn.relu
 max_required_desc_words_len = 100
 
 n_epochs = 60
-batch_size = 1000
+batch_size = 128
 lr_rate = 0.001
 
 class_weighted = False
@@ -61,9 +61,9 @@ class DescClassifier:
         self.domains_test = []
         for domains in origin_train_domains:
             shuffle(domains)
-            train_end_index = int(len(domains) * 0.8)
+            train_end_index = int(len(domains) * 0.9)
             self.domains_train.append(domains[ : train_end_index])
-            validation_end_index = int(len(domains) * (0.8 + (1 - 0.8) / 2))
+            validation_end_index = int(len(domains) * (0.9 + (1 - 0.9) / 2))
             self.domains_val.append(domains[train_end_index : validation_end_index] )
             self.domains_test.append(domains[validation_end_index: ])
 

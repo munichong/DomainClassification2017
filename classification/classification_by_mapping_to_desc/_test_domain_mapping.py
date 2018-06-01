@@ -64,9 +64,9 @@ class PretrainFastTextClassifier:
         self.domains_test = []
         for domains in origin_train_domains:
             shuffle(domains)
-            train_end_index = int(len(domains) * 0.8)
+            train_end_index = int(len(domains) * 0.9)
             self.domains_train.append(domains[ : train_end_index])
-            validation_end_index = int(len(domains) * (0.8 + (1 - 0.8) / 2))
+            validation_end_index = int(len(domains) * (0.9 + (1 - 0.9) / 2))
             self.domains_val.append(domains[train_end_index : validation_end_index] )
             self.domains_test.append(domains[validation_end_index: ])
 
@@ -172,10 +172,10 @@ class PretrainFastTextClassifier:
             logits = domain_vectors[0]
 
             for _ in range(n_fc_layers):
-                logits = tf.contrib.layers.fully_connected(logits, num_outputs=n_rnn_neurons, activation_fn=act_fn)
+                logits = tf.contrib.layers.fully_connected(logits, num_outputs=n_rnn_neurons, activation_fn=act_fn, trainable=False)
                 logits = tf.layers.dropout(logits, dropout_rate, training=is_training)
 
-            logits_pred = tf.contrib.layers.fully_connected(logits, self.params['num_targets'], activation_fn=act_fn)
+            logits_pred = tf.contrib.layers.fully_connected(logits, self.params['num_targets'], activation_fn=act_fn, trainable=False)
 
         reconstruction_loss = tf.sqrt(tf.losses.mean_squared_error(x_target, logits_pred, weights=1.0))
 
