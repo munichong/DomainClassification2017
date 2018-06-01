@@ -120,9 +120,10 @@ class PretrainFastTextClassifier:
         total_loss = 0
         total_bool = []
         total_pred = []
+        total_softmax = []
         n_batch = 0
         for X_batch_embed, domain_actual_lens, X_batch_suf, sample_weights, y_batch in self.next_batch(data):
-            batch_correct, batch_loss, batch_bool, batch_pred = session.run(eval_nodes,
+            batch_correct, batch_loss, batch_bool, batch_pred, batch_softmax = session.run(eval_nodes,
                                                          feed_dict={
                                                                     'bool_train:0': False,
                                                                     'embedding:0': X_batch_embed,
@@ -136,8 +137,9 @@ class PretrainFastTextClassifier:
             total_correct += batch_correct
             total_bool.extend(batch_bool)
             total_pred.extend(batch_pred)
+            total_softmax.extend(batch_softmax)
             n_batch += 1
-        return total_loss / n_batch, total_correct / len(data), total_bool, total_pred
+        return total_loss / n_batch, total_correct / len(data), total_bool, total_pred, total_softmax
 
 
 
@@ -216,6 +218,7 @@ class PretrainFastTextClassifier:
 
         logits = tf.contrib.layers.fully_connected(logits, self.params['num_targets'], activation_fn=act_fn)
 
+
         if class_weighted:
             crossentropy = tf.losses.sparse_softmax_cross_entropy(labels=y, logits=logits, weights=sample_weights)
         else:
@@ -226,6 +229,7 @@ class PretrainFastTextClassifier:
         training_op = optimizer.minimize(loss_mean)
 
         prediction = tf.argmax(logits, axis=-1)
+        prediction_softmax = tf.nn.softmax(logits)
         is_correct = tf.nn.in_top_k(logits, y, 1) # logits are unscaled, but here we only care the argmax
         n_correct = tf.reduce_sum(tf.cast(is_correct, tf.float32))
         accuracy = tf.reduce_mean(tf.cast(is_correct, tf.float32))
@@ -279,20 +283,20 @@ class PretrainFastTextClassifier:
 
 
                 # evaluation on training data
-                eval_nodes = [n_correct, loss_mean, is_correct, prediction]
+                eval_nodes = [n_correct, loss_mean, is_correct, prediction, prediction_softmax]
                 print()
                 print("========== Evaluation at Epoch %d ==========" % epoch)
-                loss_train, acc_train, _, _ = self.evaluate(self.domains_train, sess, eval_nodes)
+                loss_train, acc_train, _, _, _ = self.evaluate(self.domains_train, sess, eval_nodes)
                 print("*** On Training Set:\tloss = %.6f\taccuracy = %.4f"
                       % (loss_train, acc_train))
 
                 # evaluation on validation data
-                loss_val, acc_val, is_correct_val, pred_val = self.evaluate(self.domains_val, sess, eval_nodes)
+                loss_val, acc_val, is_correct_val, pred_val, softmax_val = self.evaluate(self.domains_val, sess, eval_nodes)
                 print("*** On Validation Set:\tloss = %.6f\taccuracy = %.4f"
                       % (loss_val, acc_val))
 
                 # evaluate on test data
-                loss_test, acc_test, is_correct_test, pred_test = self.evaluate(self.domains_test, sess, eval_nodes)
+                loss_test, acc_test, is_correct_test, pred_test, softmax_test = self.evaluate(self.domains_test, sess, eval_nodes)
                 print("*** On Test Set:\tloss = %.6f\taccuracy = %.4f"
                       % (loss_test, acc_test))
 
@@ -338,12 +342,14 @@ class PretrainFastTextClassifier:
                     # output all prediction
                     with open(os.path.join(OUTPUT_DIR, 'all_predictions_frozen.csv'), 'w', newline="\n") as outfile:
                         csv_writer = csv.writer(outfile)
+                        csv_writer.write(list(category2index.items()))
                         csv_writer.writerow(('RAW_DOMAIN', 'SEGMENTED_DOMAIN', 'TRUE_CATEGORY', 'PRED_CATEGORY'))
-                        for correct, pred_catIdx, domain in zip(is_correct_val, pred_val, self.domains_val):
+                        for correct, pred_catIdx, domain, pred_softmax in zip(is_correct_val, pred_val, self.domains_val, softmax_val):
                             csv_writer.writerow((domain['raw_domain'],
                                                  domain['segmented_domain'],
                                                  domain['categories'][1],
-                                                 categories[pred_catIdx]))
+                                                 categories[pred_catIdx],
+                                                 str(pred_softmax)))
 
 
 
