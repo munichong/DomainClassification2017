@@ -29,9 +29,11 @@ dropout_rate= 0.2
 n_fc_layers= 3
 act_fn = tf.nn.relu
 
-n_epochs = 80
-batch_size = 4000
+n_epochs = 60
+batch_size = 128
 lr_rate = 0.001
+
+class_weighted = False
 
 
 OUTPUT_DIR = '../../Output/'
@@ -52,39 +54,33 @@ class PretrainFastTextClassifier:
 
     def __init__(self):
         ''' load data '''
-        origin_train_domains = pickle.load(open(OUTPUT_DIR + 'training_domains_%s.list' % DATASET, 'rb'))
-        self.domains_train = []
-        self.domains_val = []
-        self.domains_test = []
-        for domains in origin_train_domains:
-            shuffle(domains)
-            train_end_index = int(len(domains) * 0.8)
-            self.domains_train.append(domains[: train_end_index])
-            validation_end_index = int(len(domains) * (0.8 + (1 - 0.8) / 2))
-            self.domains_val.append(domains[train_end_index: validation_end_index])
-            self.domains_test.append(domains[validation_end_index:])
-
-        self.domains_train = [d for cat_domains in self.domains_train for d in cat_domains]
+        self.domains_train = pickle.load(open(OUTPUT_DIR + 'training_domains_%s.list' % DATASET, 'rb'))
+        self.domains_train = [d for cat_domains in self.domains_train for d in cat_domains ]
+        self.domains_val = pickle.load(open(OUTPUT_DIR + 'validation_domains_%s.list' % DATASET, 'rb'))
         self.domains_val = [d for cat_domains in self.domains_val for d in cat_domains]
+        self.domains_test = pickle.load(open(OUTPUT_DIR + 'test_domains_%s.list' % DATASET, 'rb'))
         self.domains_test = [d for cat_domains in self.domains_test for d in cat_domains]
-        print(len(self.domains_train), len(self.domains_val), len(self.domains_test))
-
-        # ''' load data '''
-        # self.domains_train = pickle.load(open(OUTPUT_DIR + 'training_domains_%s.list' % DATASET, 'rb'))
-        # self.domains_train = [d for cat_domains in self.domains_train for d in cat_domains]
-        # self.domains_val = pickle.load(open(OUTPUT_DIR + 'validation_domains_%s.list' % DATASET, 'rb'))
-        # self.domains_val = [d for cat_domains in self.domains_val for d in cat_domains]
-        # self.domains_test = pickle.load(open(OUTPUT_DIR + 'test_domains_%s.list' % DATASET, 'rb'))
-        # self.domains_test = [d for cat_domains in self.domains_test for d in cat_domains]
 
         ''' load params '''
         self.params = json.load(open(OUTPUT_DIR + 'params_%s.json' % DATASET))
+        self.compute_class_weights()
 
+    def compute_class_weights(self):
+        n_total = sum(self.params['category_dist_traintest'].values())
+        n_class = len(self.params['category_dist_traintest'])
+        self.class_weights = {cat: max(min( n_total / (n_class * self.params['category_dist_traintest'][cat]), 1.5), 0.5)
+                              for cat, size in self.params['category_dist_traintest'].items()}
+        # self.class_weights['Sports'] = 1
+        # self.class_weights['Health'] = 1
+        # self.class_weights['Business'] = 0.8
+        # self.class_weights['Arts'] = 0.8
+        pprint(self.class_weights)
 
     def next_batch(self, domains, batch_size=batch_size):
         X_batch_embed = []
         X_batch_suf = []
         domain_actual_lens = []
+        sample_weights = []
         y_batch = []
         shuffle(domains)
         start_index = 0
@@ -106,11 +102,14 @@ class PretrainFastTextClassifier:
 
                 y_batch.append(domains[i]['target'])
             yield np.array(X_batch_embed), np.array(domain_actual_lens), np.array(X_batch_suf), \
-                  np.array(y_batch)
+                  np.array(sample_weights), np.array(y_batch)
+
+            # print(sample_weights)
 
             X_batch_embed.clear()
             domain_actual_lens.clear()
             X_batch_suf.clear()
+            sample_weights.clear()
             y_batch.clear()
             start_index += batch_size
 
@@ -121,16 +120,15 @@ class PretrainFastTextClassifier:
         total_bool = []
         total_pred = []
         n_batch = 0
-        for X_batch_embed, domain_actual_lens, X_batch_suf, y_batch in self.next_batch(data):
-            batch_correct, batch_loss, batch_bool, batch_pred = session.run(eval_nodes,
+        for X_batch_embed, domain_actual_lens, X_batch_suf, sample_weights, y_batch in self.next_batch(data):
+            batch_correct, batch_loss, batch_bool, batch_pred  = session.run(eval_nodes,
                                                          feed_dict={
                                                                     'bool_train:0': False,
                                                                     'embedding:0': X_batch_embed,
                                                                     'suffix:0': X_batch_suf,
                                                                     'length:0': domain_actual_lens,
                                                                     'target:0': y_batch})
-            # print(batch_bool)
-            # print(batch_pred)
+
             total_loss += batch_loss
             total_correct += batch_correct
             total_bool.extend(batch_bool)
@@ -160,15 +158,17 @@ class PretrainFastTextClassifier:
         y = tf.placeholder(tf.int32, shape=[None], name='target') # Each entry in y must be an index in [0, num_classes)
 
 
-        with tf.variable_scope('domain_cnn'):
-            domain_vectors = []
+
+
+        with tf.variable_scope('domain_mapping'):
+
 
             pooled_outputs = []
             for filter_size in filter_sizes:
                 # Define and initialize filters
                 filter_shape = [filter_size, embed_dimen, 1, num_filters]
-                W_filter = tf.Variable(tf.truncated_normal(filter_shape, stddev=0.1)) # initialize the filters' weights
-                b_filter = tf.Variable(tf.constant(0.1, shape=[num_filters]))  # initialize the filters' biases
+                W_filter = tf.Variable(tf.truncated_normal(filter_shape, stddev=0.1), trainable=False) # initialize the filters' weights
+                b_filter = tf.Variable(tf.constant(0.1, shape=[num_filters]), trainable=False)  # initialize the filters' biases
                 # The conv2d operation expects a 4-D tensor with dimensions corresponding to batch, width, height and channel.
                 # The result of our embedding doesn’t contain the channel dimension
                 # So we add it manually, leaving us with a layer of shape [None, sequence_length, embedding_size, 1].
@@ -182,25 +182,23 @@ class PretrainFastTextClassifier:
             # Combine all the pooled features
             h_pool = tf.concat(pooled_outputs, axis=3)
             num_filters_total = num_filters * len(filter_sizes)
-            domain_vec_cnn = tf.reshape(h_pool, [-1, num_filters_total])
-            domain_vec_cnn = tf.layers.dropout(domain_vec_cnn, dropout_rate, training=is_training)
-            domain_vectors.append(domain_vec_cnn)
+            domain_vec_cnn1 = tf.reshape(h_pool, [-1, num_filters_total])
+            domain_vec_cnn1 = tf.layers.dropout(domain_vec_cnn1, dropout_rate, training=False)
 
 
-            # concatenate suffix one-hot and the abstract representation of the domains segments
-            # The shape of cat_layer should be [batch_size, n_lstm_neurons+self.params['num_suffix']]
-            cat_layer = tf.concat(domain_vectors + [x_suffix], -1)
-            # print(cat_layer.get_shape())
+            logits = domain_vec_cnn1
 
-            logits = cat_layer
             for _ in range(n_fc_layers):
-                logits = tf.contrib.layers.fully_connected(logits, num_outputs=n_rnn_neurons, activation_fn=act_fn)
-                logits = tf.layers.dropout(logits, dropout_rate, training=is_training)
+                logits = tf.contrib.layers.fully_connected(logits, num_outputs=n_rnn_neurons, activation_fn=act_fn, trainable=False)
+                logits = tf.layers.dropout(logits, dropout_rate, training=False)
 
-            logits = tf.contrib.layers.fully_connected(logits, self.params['num_targets'], activation_fn=act_fn)
+            logits = tf.contrib.layers.fully_connected(logits, self.params['num_targets'], activation_fn=act_fn, trainable=False)
+
+        saver = tf.train.Saver()
 
 
         crossentropy = tf.losses.sparse_softmax_cross_entropy(labels=y, logits=logits)
+
 
         loss_mean = tf.reduce_mean(crossentropy)
         optimizer = tf.train.AdamOptimizer(learning_rate=lr_rate)
@@ -212,19 +210,22 @@ class PretrainFastTextClassifier:
         accuracy = tf.reduce_mean(tf.cast(is_correct, tf.float32))
 
 
-        saver = tf.train.Saver()
 
         init = tf.global_variables_initializer()
 
 
         with tf.Session() as sess:
             init.run()
+
+            saver.restore(sess, os.path.join(OUTPUT_DIR, 'domain_mapping.params'))
+            print("Model restored.")
+
             n_total_batches = int(np.ceil(len(self.domains_train) / batch_size))
-            test_fscore_history = []
+            val_fscore_history = []
             for epoch in range(1, n_epochs + 1):
                 # model training
                 n_batch = 0
-                for X_batch_embed, domain_actual_lens, X_batch_suf, y_batch in self.next_batch(self.domains_train):
+                for X_batch_embed, domain_actual_lens, X_batch_suf, sample_weights, y_batch in self.next_batch(self.domains_train):
                     _, acc_batch_train, loss_batch_train, prediction_train = sess.run([training_op, accuracy, loss_mean, prediction],
                                                                     feed_dict={
                                                                                'bool_train:0': True,
@@ -249,7 +250,7 @@ class PretrainFastTextClassifier:
                       % (loss_train, acc_train))
 
                 # evaluation on validation data
-                loss_val, acc_val, _, _ = self.evaluate(self.domains_val, sess, eval_nodes)
+                loss_val, acc_val, is_correct_val, pred_val = self.evaluate(self.domains_val, sess, eval_nodes)
                 print("*** On Validation Set:\tloss = %.6f\taccuracy = %.4f"
                       % (loss_val, acc_val))
 
@@ -259,28 +260,40 @@ class PretrainFastTextClassifier:
                       % (loss_test, acc_test))
 
 
+
                 print()
                 print("Macro average:")
                 precisions_macro, recalls_macro, fscores_macro, _ = precision_recall_fscore_support(
-                                              [category2index[domain['categories'][1]] for domain in self.domains_test],
-                                               pred_test, average='macro')
+                                              [category2index[domain['categories'][1]] for domain in self.domains_val],
+                                               pred_val, average='macro')
                 print("Precision (macro): %.4f, Recall (macro): %.4f, F-score (macro): %.4f" %
                       (precisions_macro, recalls_macro, fscores_macro))
                 print()
 
-                test_fscore_history.append(fscores_macro)
-                if fscores_macro == max(test_fscore_history):
+
+
+                if not val_fscore_history or fscores_macro > max(val_fscore_history):
+                    # the accuracy of this epoch is the largest
                     print("Classification Performance on individual classes:")
                     precisions_none, recalls_none, fscores_none, supports_none = precision_recall_fscore_support(
-                        [category2index[domain['categories'][1]] for domain in self.domains_test],
-                        pred_test, average=None)
+                        [category2index[domain['categories'][1]] for domain in self.domains_val],
+                        pred_val, average=None)
                     print(tabulate(zip((categories[i] for i in range(len(precisions_none))),
                                        precisions_none, recalls_none, fscores_none, supports_none),
                                    headers=['category', 'precision', 'recall', 'f-score', 'support'],
                                    tablefmt='orgtbl'))
 
-                    saver.save(sess, os.path.join(OUTPUT_DIR, 'domain_classifying.params'))
-                    print('Save on the disk at %s' % datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+                    # output all correct_prediction
+                    with open(os.path.join(OUTPUT_DIR, 'all_predictions_desc.csv'), 'w', newline="\n") as outfile:
+                        csv_writer = csv.writer(outfile)
+                        csv_writer.writerow(('RAW_DOMAIN', 'SEGMENTED_DOMAIN', 'TRUE_CATEGORY', "PRED_CATEGORY"))
+                        for correct, pred_catIdx, domain in zip(is_correct_val, pred_val, self.domains_val):
+                            csv_writer.writerow((domain['raw_domain'],
+                                                 domain['segmented_domain'],
+                                                 domain['categories'][1].strip(),
+                                                categories[pred_catIdx])
+                                                )
+                val_fscore_history.append(fscores_macro)
 
 
 

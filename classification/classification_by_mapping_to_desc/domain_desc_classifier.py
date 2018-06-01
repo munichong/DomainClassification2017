@@ -266,7 +266,6 @@ class PretrainFastTextClassifier:
 
 
 
-
         # combine_weight = tf.Variable(tf.random_uniform([], minval=0.0, maxval=1.0))
         '''
         combine_weight = tf.constant(0.99)
@@ -278,6 +277,7 @@ class PretrainFastTextClassifier:
         logits_combine = tf.contrib.layers.fully_connected(cat_logits, self.params['num_targets'], activation_fn=act_fn)
         '''
 
+        '''
         with tf.variable_scope('combine_weighting'):
             pooled_outputs = []
             for filter_size in filter_sizes:
@@ -300,7 +300,7 @@ class PretrainFastTextClassifier:
             num_filters_total = num_filters * len(filter_sizes)
             domain_vec_cnn3 = tf.reshape(h_pool, [-1, num_filters_total])
             domain_vec_cnn3 = tf.nn.l2_normalize(domain_vec_cnn3, dim=-1)
-
+        '''
 
 
         domain_imp = tf.constant(0.5)
