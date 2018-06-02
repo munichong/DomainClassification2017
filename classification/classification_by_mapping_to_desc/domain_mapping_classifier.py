@@ -29,7 +29,7 @@ dropout_rate= 0.2
 n_fc_layers= 3
 act_fn = tf.nn.relu
 
-n_epochs = 60
+n_epochs = 30
 batch_size = 128
 lr_rate = 0.001
 
@@ -194,7 +194,7 @@ class PretrainFastTextClassifier:
                 logits = tf.contrib.layers.fully_connected(logits, num_outputs=n_rnn_neurons, activation_fn=act_fn, trainable=False)
                 logits = tf.layers.dropout(logits, dropout_rate, training=False)
 
-            logits = tf.contrib.layers.fully_connected(logits, self.params['num_targets'], activation_fn=act_fn, trainable=False)
+            logits = tf.contrib.layers.fully_connected(logits, self.params['num_targets'], activation_fn=act_fn)
 
         saver = tf.train.Saver()
 
@@ -287,9 +287,9 @@ class PretrainFastTextClassifier:
                                    tablefmt='orgtbl'))
 
                     # output all prediction
-                    with open(os.path.join(OUTPUT_DIR, 'all_predictions_frozen.csv'), 'w', newline="\n") as outfile:
+                    with open(os.path.join(OUTPUT_DIR, 'all_predictions_mapping.csv'), 'w', newline="\n") as outfile:
                         csv_writer = csv.writer(outfile)
-                        csv_writer.write(list(category2index.items()))
+                        csv_writer.writerow(sorted(category2index.items(), key=lambda x: x[1]))
                         csv_writer.writerow(('RAW_DOMAIN', 'SEGMENTED_DOMAIN', 'TRUE_CATEGORY', 'PRED_CATEGORY'))
                         for correct, pred_catIdx, domain, pred_softmax in zip(is_correct_val, pred_val,
                                                                               self.domains_val, softmax_val):

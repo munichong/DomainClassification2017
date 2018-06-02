@@ -68,7 +68,9 @@ class PretrainFastTextClassifier:
     def compute_class_weights(self):
         n_total = sum(self.params['category_dist_traintest'].values())
         n_class = len(self.params['category_dist_traintest'])
-        self.class_weights = {cat: max(min( n_total / (n_class * self.params['category_dist_traintest'][cat]), 1.5), 0.5)
+        # min_w, max_w = 0.5, 1.5
+        min_w, max_w = 0.0, np.inf
+        self.class_weights = {cat: max(min(n_total / (n_class * self.params['category_dist_traintest'][cat]), max_w), min_w)
                               for cat, size in self.params['category_dist_traintest'].items()}
         # self.class_weights['Sports'] = 1
         # self.class_weights['Health'] = 1
@@ -342,7 +344,7 @@ class PretrainFastTextClassifier:
                     # output all prediction
                     with open(os.path.join(OUTPUT_DIR, 'all_predictions_frozen.csv'), 'w', newline="\n") as outfile:
                         csv_writer = csv.writer(outfile)
-                        csv_writer.write(list(category2index.items()))
+                        csv_writer.writerow(sorted(category2index.items(), key=lambda x: x[1]))
                         csv_writer.writerow(('RAW_DOMAIN', 'SEGMENTED_DOMAIN', 'TRUE_CATEGORY', 'PRED_CATEGORY'))
                         for correct, pred_catIdx, domain, pred_softmax in zip(is_correct_val, pred_val, self.domains_val, softmax_val):
                             csv_writer.writerow((domain['raw_domain'],
