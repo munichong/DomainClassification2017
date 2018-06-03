@@ -48,7 +48,8 @@ print(categories)
 print("Loading the FastText Model")
 # en_model = {"test":np.array([0]*300)}
 en_model = FastText.load_fasttext_format('../FastText/wiki.en/wiki.en')
-
+print('golang' in en_model)
+print('carcarbike' in en_model)
 
 class PretrainFastTextClassifier:
 
@@ -68,8 +69,8 @@ class PretrainFastTextClassifier:
     def compute_class_weights(self):
         n_total = sum(self.params['category_dist_traintest'].values())
         n_class = len(self.params['category_dist_traintest'])
-        # min_w, max_w = 0.5, 1.5
-        min_w, max_w = 0.0, np.inf
+        min_w, max_w = 0.5, 1.5
+        # min_w, max_w = 0.0, np.inf
         self.class_weights = {cat: max(min(n_total / (n_class * self.params['category_dist_traintest'][cat]), max_w), min_w)
                               for cat, size in self.params['category_dist_traintest'].items()}
         # self.class_weights['Sports'] = 1
@@ -80,6 +81,7 @@ class PretrainFastTextClassifier:
 
     def next_batch(self, domains, batch_size=batch_size):
         X_batch_embed = []
+        X_batch_all = []
         X_batch_suf = []
         domain_actual_lens = []
         sample_weights = []
@@ -98,18 +100,24 @@ class PretrainFastTextClassifier:
                 # X_batch_embed.append(tf.pad(embeds, paddings=[[0, n_extra_padding],[0,0]], mode="CONSTANT"))
                 X_batch_embed.append(embeds)
 
+                if domains[i]['domain'] in en_model:
+                    X_batch_all.append(en_model[domains[i]['domain']])
+                else:
+                    X_batch_all.append(np.zeros(embed_dimen))
+
                 one_hot_suf = np.zeros(self.params['num_suffix'])
                 one_hot_suf[domains[i]['suffix_indices']] = 1.0 / len(domains[i]['suffix_indices'])
                 X_batch_suf.append(one_hot_suf)
 
                 sample_weights.append(self.class_weights[categories[domains[i]['target']]])
                 y_batch.append(domains[i]['target'])
-            yield np.array(X_batch_embed), np.array(domain_actual_lens), np.array(X_batch_suf), \
+            yield np.array(X_batch_embed), np.array(X_batch_all), np.array(domain_actual_lens), np.array(X_batch_suf), \
                   np.array(sample_weights), np.array(y_batch)
 
             # print(sample_weights)
 
             X_batch_embed.clear()
+            X_batch_all.clear()
             domain_actual_lens.clear()
             X_batch_suf.clear()
             sample_weights.clear()
@@ -124,11 +132,12 @@ class PretrainFastTextClassifier:
         total_pred = []
         total_softmax = []
         n_batch = 0
-        for X_batch_embed, domain_actual_lens, X_batch_suf, sample_weights, y_batch in self.next_batch(data):
+        for X_batch_embed, X_batch_all, domain_actual_lens, X_batch_suf, sample_weights, y_batch in self.next_batch(data):
             batch_correct, batch_loss, batch_bool, batch_pred, batch_softmax = session.run(eval_nodes,
                                                          feed_dict={
                                                                     'bool_train:0': False,
                                                                     'embedding:0': X_batch_embed,
+                                                                    'entire_domain:0': X_batch_all,
                                                                     'suffix:0': X_batch_suf,
                                                                     'length:0': domain_actual_lens,
                                                                     'weight:0': sample_weights,
@@ -154,6 +163,9 @@ class PretrainFastTextClassifier:
         x_embed = tf.placeholder(tf.float32,
                                  shape=[None, self.params['max_domain_segments_len'], embed_dimen],
                                  name='embedding')
+        x_all = tf.placeholder(tf.float32,
+                                 shape=[None, embed_dimen],
+                                 name='entire_domain')
 
         # print(x_embed.get_shape())
         x_suffix = tf.placeholder(tf.float32,
@@ -210,7 +222,7 @@ class PretrainFastTextClassifier:
 
         # concatenate suffix one-hot and the abstract representation of the domains segments
         # The shape of cat_layer should be [batch_size, n_lstm_neurons+self.params['num_suffix']]
-        cat_layer = tf.concat(domain_vectors + [x_suffix], -1)
+        cat_layer = tf.concat(domain_vectors + [x_suffix, x_all], -1)
         # print(cat_layer.get_shape())
 
         logits = cat_layer
@@ -267,11 +279,12 @@ class PretrainFastTextClassifier:
             for epoch in range(1, n_epochs + 1):
                 # model training
                 n_batch = 0
-                for X_batch_embed, domain_actual_lens, X_batch_suf, sample_weights, y_batch in self.next_batch(self.domains_train):
+                for X_batch_embed, X_batch_all, domain_actual_lens, X_batch_suf, sample_weights, y_batch in self.next_batch(self.domains_train):
                     _, acc_batch_train, loss_batch_train, prediction_train = sess.run([training_op, accuracy, loss_mean, prediction],
                                                                     feed_dict={
                                                                                'bool_train:0': True,
                                                                                'embedding:0': X_batch_embed,
+                                                                               'entire_domain:0': X_batch_all,
                                                                                'suffix:0': X_batch_suf,
                                                                                'length:0': domain_actual_lens,
                                                                                'weight:0': sample_weights,
