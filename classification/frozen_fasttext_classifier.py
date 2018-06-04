@@ -205,11 +205,13 @@ class PretrainFastTextClassifier:
                 # The result of our embedding doesn’t contain the channel dimension
                 # So we add it manually, leaving us with a layer of shape [None, sequence_length, embedding_size, 1].
                 x_embed_expanded = tf.expand_dims(x_embed, -1)
-                conv = tf.nn.conv2d(x_embed_expanded, W_filter, strides=[1, 1, 1, 1], padding="VALID")
+
+                conv = tf.nn.conv2d(x_embed_expanded, W_filter, strides=[1, 1, 1, 1], padding="SAME")
                 # Apply nonlinearity
                 h = tf.nn.relu(tf.nn.bias_add(conv, b_filter), name="relu")
                 pooled = tf.nn.max_pool(h, ksize=[1, self.params['max_domain_segments_len'] - filter_size + 1, 1, 1],
                                         strides=[1, 1, 1, 1], padding='VALID')
+
                 pooled_outputs.append(pooled)
             # Combine all the pooled features
             h_pool = tf.concat(pooled_outputs, axis=3)
