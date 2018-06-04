@@ -218,9 +218,10 @@ class PretrainFastTextClassifier:
 
                 conv_out1 = self.conv_layer(x_embed_expanded, W_filter, b_filter)
                 maxpool_out1 = self.maxpool_layer(conv_out1, filter_size)
+                norm1 = tf.nn.lrn(maxpool_out1, bias=1.0, alpha=0.001/9.0, beta=0.75)
 
 
-                pooled_outputs.append(maxpool_out1)
+                pooled_outputs.append(norm1)
 
             # Combine all the pooled features
             h_pool = tf.concat(pooled_outputs, axis=3)
