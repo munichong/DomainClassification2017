@@ -151,16 +151,22 @@ class PretrainFastTextClassifier:
         return total_loss / n_batch, total_correct / len(data), total_bool, total_pred, total_softmax
 
     def conv_layer(self, x, W, b):
-        conv = tf.nn.conv2d(x, W, strides=[1, 1, embed_dimen, 1], padding="SAME")
+        k = x.get_shape().as_list()[2]
+        conv = tf.nn.conv2d(x, W, strides=[1, 1, k, 1], padding="SAME")
         conv_with_b = tf.nn.bias_add(conv, b)
         # Apply nonlinearity
         conv_out = tf.nn.relu(conv_with_b, name="relu")
         return conv_out
 
     def maxpool_layer(self, conv, filter_size):
+        maxpool_out = tf.nn.max_pool(conv, ksize=[1, filter_size, 1, 1],
+                                     strides=[1, 1, 1, 1], padding='SAME')
+
+        return maxpool_out
+
+    def maxpool_layer_last(self, conv, filter_size):
         # k = self.params['max_domain_segments_len'] - filter_size + 1
         k = self.params['max_domain_segments_len']
-        print(k)
         maxpool_out = tf.nn.max_pool(conv, ksize=[1, k, 1, 1],
                                 strides=[1, 1, 1, 1], padding='VALID')
         return maxpool_out
@@ -210,8 +216,7 @@ class PretrainFastTextClassifier:
             for filter_size in filter_sizes:
                 # Define and initialize filters
                 filter_shape = [filter_size, embed_dimen, 1, num_filters]
-                W_filter = tf.Variable(tf.truncated_normal(filter_shape, stddev=0.1)) # initialize the filters' weights
-                b_filter = tf.Variable(tf.constant(0.1, shape=[num_filters]))  # initialize the filters' biases
+
                 # The conv2d operation expects a 4-D tensor with dimensions corresponding to batch, width, height and channel.
                 # The result of our embedding doesn’t contain the channel dimension
                 # So we add it manually, leaving us with a layer of shape [None, sequence_length, embedding_size, 1].
@@ -219,14 +224,25 @@ class PretrainFastTextClassifier:
 
                 print(x_embed_expanded.get_shape())
 
-                conv_out1 = self.conv_layer(x_embed_expanded, W_filter, b_filter)
+                W_filter1 = tf.Variable(tf.truncated_normal(filter_shape, stddev=0.1))  # initialize the filters' weights
+                b_filter1 = tf.Variable(tf.constant(0.1, shape=[num_filters]))  # initialize the filters' biases
+                conv_out1 = self.conv_layer(x_embed_expanded, W_filter1, b_filter1)
                 print(conv_out1.get_shape())
                 maxpool_out1 = self.maxpool_layer(conv_out1, filter_size)
                 print(maxpool_out1.get_shape())
-                norm1 = tf.nn.lrn(maxpool_out1, bias=1.0, alpha=0.001/9.0, beta=0.75)
+                flatten_out1 = tf.reshape(maxpool_out1, [-1, self.params['max_domain_segments_len'], num_filters, 1])
+                print(flatten_out1.get_shape())
+
+                W_filter2 = tf.Variable(
+                    tf.truncated_normal([filter_size, num_filters, 1, num_filters], stddev=0.1))  # initialize the filters' weights
+                b_filter2 = tf.Variable(tf.constant(0.1, shape=[num_filters]))  # initialize the filters' biases
+                conv_out2 = self.conv_layer(flatten_out1, W_filter2, b_filter2)
+                print(conv_out2.get_shape())
+                maxpool_out2 = self.maxpool_layer_last(conv_out2, filter_size)
+                print(maxpool_out2.get_shape())
 
 
-                pooled_outputs.append(norm1)
+                pooled_outputs.append(maxpool_out2)
 
             # Combine all the pooled features
             h_pool = tf.concat(pooled_outputs, axis=3)
