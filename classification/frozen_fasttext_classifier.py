@@ -152,7 +152,17 @@ class PretrainFastTextClassifier:
             n_batch += 1
         return total_loss / n_batch, total_correct / len(data), total_bool, total_pred, total_softmax
 
+    def conv_layer(self, x, W, b):
+        conv = tf.nn.conv2d(x, W, strides=[1, 1, 1, 1], padding="SAME")
+        conv_with_b = tf.nn.bias_add(conv, b)
+        # Apply nonlinearity
+        conv_out = tf.nn.relu(conv_with_b, name="relu")
+        return conv_out
 
+    def maxpool_layer(self, conv, filter_size):
+        maxpool_out = tf.nn.max_pool(h, ksize=[1, self.params['max_domain_segments_len'] - filter_size + 1, 1, 1],
+                                strides=[1, 1, 1, 1], padding='VALID')
+        return maxpool_out
 
     def run_graph(self):
 
@@ -206,13 +216,12 @@ class PretrainFastTextClassifier:
                 # So we add it manually, leaving us with a layer of shape [None, sequence_length, embedding_size, 1].
                 x_embed_expanded = tf.expand_dims(x_embed, -1)
 
-                conv = tf.nn.conv2d(x_embed_expanded, W_filter, strides=[1, 1, 1, 1], padding="SAME")
-                # Apply nonlinearity
-                h = tf.nn.relu(tf.nn.bias_add(conv, b_filter), name="relu")
-                pooled = tf.nn.max_pool(h, ksize=[1, self.params['max_domain_segments_len'] - filter_size + 1, 1, 1],
-                                        strides=[1, 1, 1, 1], padding='VALID')
+                conv_out1 = self.conv_layer(x_embed_expanded, W_filter, b_filter)
+                maxpool_out1 = self.maxpool_layer(conv_out1, filter_size)
 
-                pooled_outputs.append(pooled)
+
+                pooled_outputs.append(maxpool_out1)
+
             # Combine all the pooled features
             h_pool = tf.concat(pooled_outputs, axis=3)
             num_filters_total = num_filters * len(filter_sizes)
