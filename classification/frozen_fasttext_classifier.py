@@ -30,7 +30,7 @@ n_fc_layers= 3
 act_fn = tf.nn.relu
 
 n_epochs = 40
-batch_size = 256
+batch_size = 2000
 lr_rate = 0.001
 
 class_weighted = False
@@ -215,6 +215,11 @@ class PretrainFastTextClassifier:
             h_pool = tf.concat(pooled_outputs, axis=3)
             num_filters_total = num_filters * len(filter_sizes)
             domain_vec_cnn = tf.reshape(h_pool, [-1, num_filters_total])
+
+            # filter_weights = tf.Variable(tf.truncated_normal([num_filters_total], stddev=0.1))
+            # domain_vec_cnn = domain_vec_cnn * filter_weights
+
+
             domain_vec_cnn = tf.layers.dropout(domain_vec_cnn, dropout_rate, training=is_training)
             domain_vectors.append(domain_vec_cnn)
 
