@@ -210,7 +210,7 @@ class PretrainFastTextClassifier:
 
         domain_vectors = []
         if 'RNN' in type:
-            rnn_cell = tf.contrib.rnn.BasicRNNCell(n_rnn_neurons, activation=tf.nn.tanh)
+            rnn_cell = tf.nn.rnn_cell.BasicRNNCell(n_rnn_neurons, activation=tf.nn.tanh)
             # The shape of last_states should be [batch_size, n_lstm_neurons]
             _, domain_vec_rnn = tf.nn.dynamic_rnn(rnn_cell, x_embed, sequence_length=seq_len, dtype=tf.float32, time_major=False)
             domain_vec_rnn = tf.layers.dropout(domain_vec_rnn, dropout_rate, training=is_training)
@@ -218,12 +218,9 @@ class PretrainFastTextClassifier:
         if 'CNN' in type:
             pooled_outputs = []
             for filter_size in filter_sizes:
-                # Define and initialize filters
+
                 filter_shape = [filter_size, embed_dimen, 1, num_filters]
 
-                # The conv2d operation expects a 4-D tensor with dimensions corresponding to batch, width, height and channel.
-                # The result of our embedding doesn’t contain the channel dimension
-                # So we add it manually, leaving us with a layer of shape [None, sequence_length, embedding_size, 1].
                 x_embed_expanded = tf.expand_dims(x_embed, -1)
 
                 print(x_embed_expanded.get_shape())
@@ -252,10 +249,8 @@ class PretrainFastTextClassifier:
             # filter_weights = tf.Variable(tf.truncated_normal([num_filters_total], stddev=0.1))
             # domain_vec_cnn = domain_vec_cnn * filter_weights
 
-
             domain_vec_cnn = tf.layers.dropout(domain_vec_cnn, dropout_rate, training=is_training)
             domain_vectors.append(domain_vec_cnn)
-
 
 
         # concatenate suffix one-hot and the abstract representation of the domains segments
@@ -265,10 +260,10 @@ class PretrainFastTextClassifier:
 
         logits = cat_layer
         for _ in range(n_fc_layers):
-            logits = tf.contrib.layers.fully_connected(logits, num_outputs=n_rnn_neurons, activation_fn=act_fn)
+            logits = tf.layers.dense(logits, num_outputs=n_rnn_neurons, activation_fn=act_fn)
             logits = tf.layers.dropout(logits, dropout_rate, training=is_training)
 
-        logits = tf.contrib.layers.fully_connected(logits, self.params['num_targets'], activation_fn=act_fn)
+        logits = tf.layers.dense(logits, self.params['num_targets'], activation_fn=act_fn)
 
 
         if class_weighted:
