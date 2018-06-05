@@ -151,16 +151,16 @@ class PretrainFastTextClassifier:
             n_batch += 1
         return total_loss / n_batch, total_correct / len(data), total_bool, total_pred, total_softmax
 
-    def conv_layer(self, x, filter_shape):
-        W = tf.Variable(tf.truncated_normal(filter_shape, stddev=0.1))  # initialize the filters' weights
-        b = tf.Variable(tf.constant(0.1, shape=[num_filters]))  # initialize the filters' biases
+    def conv_layer(self, x, filter_size, width):
+        conv = tf.layers.conv2d(inputs=x,
+                                filters=num_filters,
+                                kernel_size=[filter_size, width],
+                                strides=[1, width],
+                                padding="same",
+                                activation=tf.nn.relu,
+                                use_bias=True)
 
-        k = x.get_shape().as_list()[2]
-        conv = tf.nn.conv2d(x, W, strides=[1, 1, k, 1], padding="SAME")
-        conv_with_b = tf.nn.bias_add(conv, b)
-        # Apply nonlinearity
-        conv_out = tf.nn.relu(conv_with_b, name="relu")
-        return conv_out
+        return conv
 
     def maxpool_layer(self, conv, filter_size):
         maxpool_out = tf.layers.max_pooling2d(inputs=conv,
@@ -223,18 +223,19 @@ class PretrainFastTextClassifier:
 
                 x_embed_expanded = tf.expand_dims(x_embed, -1)
 
-                print(x_embed_expanded.get_shape())
+                # print(x_embed_expanded.get_shape())
 
                 flatten_out = x_embed_expanded
+                k = embed_dimen
                 for _ in range(n_cnn_layer - 1):
-                    conv_out = self.conv_layer(flatten_out, filter_shape)
+                    conv_out = self.conv_layer(flatten_out, filter_size, k)
                     # print(conv_out.get_shape())
                     maxpool_out = self.maxpool_layer(conv_out, filter_size)
                     # print(maxpool_out.get_shape())
                     flatten_out = tf.reshape(maxpool_out, [-1, self.params['max_domain_segments_len'], num_filters, 1])
                     # print(flatten_out1.get_shape())
 
-                conv_out = self.conv_layer(flatten_out, [filter_size, num_filters, 1, num_filters])
+                conv_out = self.conv_layer(flatten_out, filter_size, k)
                 # print(conv_out.get_shape())
                 maxpool_out = self.maxpool_layer_last(conv_out)
                 # print(maxpool_out.get_shape())
