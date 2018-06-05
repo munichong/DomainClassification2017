@@ -163,16 +163,16 @@ class PretrainFastTextClassifier:
         return conv_out
 
     def maxpool_layer(self, conv, filter_size):
-        maxpool_out = tf.nn.max_pool(conv, ksize=[1, filter_size, 1, 1],
-                                     strides=[1, 1, 1, 1], padding='SAME')
+        maxpool_out = tf.layers.max_pooling2d(inputs=conv,
+                                              pool_size=[filter_size, 1],
+                                              strides=[1, 1], padding='same')
 
         return maxpool_out
 
-    def maxpool_layer_last(self, conv, filter_size):
-        # k = self.params['max_domain_segments_len'] - filter_size + 1
-        k = self.params['max_domain_segments_len']
-        maxpool_out = tf.nn.max_pool(conv, ksize=[1, k, 1, 1],
-                                strides=[1, 1, 1, 1], padding='VALID')
+    def maxpool_layer_last(self, conv):
+        maxpool_out = tf.layers.max_pooling2d(inputs=conv,
+                                              pool_size=[self.params['max_domain_segments_len'], 1],
+                                              strides=[1, 1], padding='valid')
         return maxpool_out
 
     def run_graph(self):
