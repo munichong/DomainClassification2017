@@ -236,7 +236,7 @@ class PretrainFastTextClassifier:
 
                 conv_out = self.conv_layer(flatten_out, [filter_size, num_filters, 1, num_filters])
                 # print(conv_out.get_shape())
-                maxpool_out = self.maxpool_layer_last(conv_out, filter_size)
+                maxpool_out = self.maxpool_layer_last(conv_out)
                 # print(maxpool_out.get_shape())
 
                 pooled_outputs.append(maxpool_out)
