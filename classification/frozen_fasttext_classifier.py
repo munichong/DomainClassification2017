@@ -151,28 +151,31 @@ class PretrainFastTextClassifier:
             n_batch += 1
         return total_loss / n_batch, total_correct / len(data), total_bool, total_pred, total_softmax
 
-    def conv_layer(self, x, filter_shape):
-        W = tf.Variable(tf.truncated_normal(filter_shape, stddev=0.1))  # initialize the filters' weights
-        b = tf.Variable(tf.constant(0.1, shape=[num_filters]))  # initialize the filters' biases
-
-        k = x.get_shape().as_list()[2]
-        conv = tf.nn.conv2d(x, W, strides=[1, 1, k, 1], padding="SAME")
-        conv_with_b = tf.nn.bias_add(conv, b)
-        # Apply nonlinearity
-        conv_out = tf.nn.relu(conv_with_b, name="relu")
-        return conv_out
+    def conv_layer(self, x, filter_size, width):
+        conv = tf.layers.conv2d(inputs=x,
+                                filters=num_filters,
+                                kernel_size=[filter_size, width],
+                                strides=[1, width],
+                                padding="same",
+                                activation=tf.nn.relu,
+                                use_bias=True)
+        return conv
 
     def maxpool_layer(self, conv, filter_size):
-        maxpool_out = tf.nn.max_pool(conv, ksize=[1, filter_size, 1, 1],
-                                     strides=[1, 1, 1, 1], padding='SAME')
+        maxpool_out = tf.layers.max_pooling2d(inputs=conv,
+                                              pool_size=[filter_size, 1],
+                                              strides=[1, 1], padding='same')
 
         return maxpool_out
 
-    def maxpool_layer_last(self, conv, filter_size):
+    def maxpool_layer_last(self, conv):
+        maxpool_out = tf.layers.max_pooling2d(inputs=conv,
+                                              pool_size=[self.params['max_domain_segments_len'], 1],
+                                              strides=[1, 1], padding='valid')
         # k = self.params['max_domain_segments_len'] - filter_size + 1
-        k = self.params['max_domain_segments_len']
-        maxpool_out = tf.nn.max_pool(conv, ksize=[1, k, 1, 1],
-                                strides=[1, 1, 1, 1], padding='VALID')
+        # k = self.params['max_domain_segments_len']
+        # maxpool_out = tf.nn.max_pool(conv, ksize=[1, k, 1, 1],
+        #                         strides=[1, 1, 1, 1], padding='VALID')
         return maxpool_out
 
     def run_graph(self):
@@ -225,19 +228,21 @@ class PretrainFastTextClassifier:
 
                 print(x_embed_expanded.get_shape())
 
-                flatten_out = x_embed_expanded
+                maxpool_out = x_embed_expanded
+                k = embed_dimen
                 for _ in range(n_cnn_layer - 1):
-                    conv_out = self.conv_layer(flatten_out, filter_shape)
-                    # print(conv_out.get_shape())
+                    conv_out = self.conv_layer(maxpool_out, filter_size, k)
+                    print(conv_out.get_shape())
                     maxpool_out = self.maxpool_layer(conv_out, filter_size)
-                    # print(maxpool_out.get_shape())
-                    flatten_out = tf.reshape(maxpool_out, [-1, self.params['max_domain_segments_len'], num_filters, 1])
-                    # print(flatten_out1.get_shape())
+                    print(maxpool_out.get_shape())
+                    maxpool_out = tf.reshape(maxpool_out, [-1, self.params['max_domain_segments_len'], num_filters, 1])
+                    print(maxpool_out.get_shape())
+                    k = num_filters
 
-                conv_out = self.conv_layer(flatten_out, [filter_size, num_filters, 1, num_filters])
-                # print(conv_out.get_shape())
-                maxpool_out = self.maxpool_layer_last(conv_out, filter_size)
-                # print(maxpool_out.get_shape())
+                conv_out = self.conv_layer(maxpool_out, filter_size, k)
+                print(conv_out.get_shape())
+                maxpool_out = self.maxpool_layer_last(conv_out)
+                print(maxpool_out.get_shape())
 
                 pooled_outputs.append(maxpool_out)
 
@@ -260,10 +265,10 @@ class PretrainFastTextClassifier:
 
         logits = cat_layer
         for _ in range(n_fc_layers):
-            logits = tf.layers.dense(logits, num_outputs=n_rnn_neurons, activation_fn=act_fn)
+            logits = tf.layers.dense(logits, units=n_rnn_neurons, activation=act_fn)
             logits = tf.layers.dropout(logits, dropout_rate, training=is_training)
 
-        logits = tf.layers.dense(logits, self.params['num_targets'], activation_fn=act_fn)
+        logits = tf.layers.dense(logits, units=self.params['num_targets'], activation=act_fn)
 
 
         if class_weighted:
@@ -348,21 +353,17 @@ class PretrainFastTextClassifier:
                 print("*** On Test Set:\tloss = %.6f\taccuracy = %.4f"
                       % (loss_test, acc_test))
 
-
-
-                print()
-                print("Macro average:")
-                precisions_macro, recalls_macro, fscores_macro, _ = precision_recall_fscore_support(
-                                              [category2index[domain['categories'][1]] for domain in self.domains_val],
-                                               pred_val, average='macro')
+                precisions_macro_val, recalls_macro_val, fscores_macro_val, _ = precision_recall_fscore_support(
+                    [category2index[domain['categories'][1]] for domain in self.domains_val],
+                    pred_val, average='macro')
                 print("Precision (macro): %.4f, Recall (macro): %.4f, F-score (macro): %.4f" %
-                      (precisions_macro, recalls_macro, fscores_macro))
-                print()
+                      (precisions_macro_val, recalls_macro_val, fscores_macro_val))
 
 
+                if not val_fscore_history or fscores_macro_val > max(val_fscore_history):
+                    print("GET THE HIGHEST ***F-SCORE*** ON THE ***VALIDATION DATA***!")
+                    print()
 
-                if not val_fscore_history or fscores_macro > max(val_fscore_history):
-                    print("GET THE HIGHEST ***F-SCORE*** ON THE ***VALIDATION DATA***")
                     print("[*** Test Data ***] Classification Performance on individual classes:")
                     precisions_none, recalls_none, fscores_none, supports_none = precision_recall_fscore_support(
                         [category2index[domain['categories'][1]] for domain in self.domains_test], pred_test, average=None)
@@ -370,6 +371,11 @@ class PretrainFastTextClassifier:
                                        precisions_none, recalls_none, fscores_none, supports_none),
                                    headers=['category', 'precision', 'recall', 'f-score', 'support'],
                                    tablefmt='orgtbl'))
+                    precisions_macro_test, recalls_macro_test, fscores_macro_test, _ = precision_recall_fscore_support(
+                        [category2index[domain['categories'][1]] for domain in self.domains_test],
+                        pred_test, average='macro')
+                    print("Precision (macro): %.4f, Recall (macro): %.4f, F-score (macro): %.4f" %
+                          (precisions_macro_test, recalls_macro_test, fscores_macro_test))
 
                     # output all incorrect_prediction
                     with open(os.path.join(OUTPUT_DIR, 'incorrect_predictions.csv'), 'w', newline="\n") as outfile:
@@ -382,7 +388,7 @@ class PretrainFastTextClassifier:
                                                  domain['segmented_domain'],
                                                  domain['categories'][1],
                                                  categories[pred_catIdx]))
-                    val_fscore_history.append(fscores_macro)
+                    val_fscore_history.append(fscores_macro_val)
 
 
 
