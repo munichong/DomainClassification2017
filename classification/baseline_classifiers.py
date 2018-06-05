@@ -86,6 +86,12 @@ class BaselineClassifier:
         return pos_ngrams
 
     def testcases_with_nonzero_vectors(self, X, y):
+        '''
+        Remove all test cases with all zero vectors
+        :param X:
+        :param y:
+        :return:
+        '''
         nonzero_rows, _ = X.nonzero()
         nonzero_indices = numpy.unique(nonzero_rows)
         y_new = numpy.array(y)[nonzero_indices.tolist()]
@@ -116,13 +122,13 @@ class BaselineClassifier:
             y.append(domain['target'])
         return X, y
 
-    def evaluate(self, X, y, vectorizer):
+    def transform(self, X, y, vectorizer):
         X = vectorizer.transform(X)
         print("X has been transformed")
-        total_size = X.shape[0]
-        X, y = self.testcases_with_nonzero_vectors(X, y)
-        actual_size = X.shape[0]
-        print(actual_size, "out of", total_size, "examples have non-zero feature vectors")
+        # total_size = X.shape[0]
+        # X, y = self.testcases_with_nonzero_vectors(X, y)
+        # actual_size = X.shape[0]
+        # print(actual_size, "out of", total_size, "examples have non-zero feature vectors")
         return X, y
 
 
@@ -140,12 +146,12 @@ class BaselineClassifier:
 
         print("Loading Validation Data...")
         X_val, y_val = self.get_XY(token, False, 'validation_domains_%s.list' % DATASET)
-        X_val, y_val = self.evaluate(X_val, y_val, vectorizer)
+        X_val, y_val = self.transform(X_val, y_val, vectorizer)
 
 
         print("Loading Test Data...")
         X_test, y_test = self.get_XY(token, False, 'test_domains_%s.list' % DATASET)
-        X_test, y_test = self.evaluate(X_test, y_test, vectorizer)
+        X_test, y_test = self.transform(X_test, y_test, vectorizer)
 
         return X_train, y_train, X_val, y_val, X_test, y_test
 
@@ -241,5 +247,5 @@ if __name__ == '__main__':
     '''
     X_train, y_train, X_val, y_val, X_test, y_test = classifier.buildXY(token='char-ngram', desc=False)
 
-    clf = LinearSVC(C=0.1, penalty='l2', verbose=0)
+    clf = LinearSVC(C=0.5, penalty='l2', verbose=0)
     classifier.get_detailed_evalRes(clf, X_train, y_train, X_val, y_val, X_test, y_test)
