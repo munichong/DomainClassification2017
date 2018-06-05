@@ -25,12 +25,13 @@ num_filters = 512
 
 embed_dimen = 300
 # n_fc_neurons = 64
-dropout_rate= 0.5
+dropout_rate = 0.5
+n_cnn_layer = 1
 n_fc_layers= 3
 act_fn = tf.nn.relu
 
 n_epochs = 40
-batch_size = 256
+batch_size = 512
 lr_rate = 0.001
 
 class_weighted = False
@@ -227,29 +228,21 @@ class PretrainFastTextClassifier:
 
                 print(x_embed_expanded.get_shape())
 
+                flatten_out = x_embed_expanded
+                for _ in range(n_cnn_layer - 1):
+                    conv_out = self.conv_layer(flatten_out, filter_shape)
+                    # print(conv_out.get_shape())
+                    maxpool_out = self.maxpool_layer(conv_out, filter_size)
+                    # print(maxpool_out.get_shape())
+                    flatten_out = tf.reshape(maxpool_out, [-1, self.params['max_domain_segments_len'], num_filters, 1])
+                    # print(flatten_out1.get_shape())
 
-                conv_out1 = self.conv_layer(x_embed_expanded, filter_shape)
-                print(conv_out1.get_shape())
-                maxpool_out1 = self.maxpool_layer(conv_out1, filter_size)
-                print(maxpool_out1.get_shape())
-                flatten_out1 = tf.reshape(maxpool_out1, [-1, self.params['max_domain_segments_len'], num_filters, 1])
-                print(flatten_out1.get_shape())
+                conv_out = self.conv_layer(flatten_out, [filter_size, num_filters, 1, num_filters])
+                # print(conv_out.get_shape())
+                maxpool_out = self.maxpool_layer_last(conv_out, filter_size)
+                # print(maxpool_out.get_shape())
 
-                conv_out2 = self.conv_layer(flatten_out1, filter_shape)
-                print(conv_out2.get_shape())
-                maxpool_out2 = self.maxpool_layer(conv_out2, filter_size)
-                print(maxpool_out2.get_shape())
-                flatten_out2 = tf.reshape(maxpool_out2, [-1, self.params['max_domain_segments_len'], num_filters, 1])
-                print(flatten_out2.get_shape())
-
-
-                conv_out3 = self.conv_layer(flatten_out2, [filter_size, num_filters, 1, num_filters])
-                print(conv_out3.get_shape())
-                maxpool_out3 = self.maxpool_layer_last(conv_out3, filter_size)
-                print(maxpool_out3.get_shape())
-
-
-                pooled_outputs.append(maxpool_out3)
+                pooled_outputs.append(maxpool_out)
 
             # Combine all the pooled features
             h_pool = tf.concat(pooled_outputs, axis=3)
@@ -374,11 +367,10 @@ class PretrainFastTextClassifier:
 
 
                 if not val_fscore_history or fscores_macro > max(val_fscore_history):
-                    # the accuracy of this epoch is the largest
-                    print("Classification Performance on individual classes:")
+                    print("GET THE HIGHEST ***F-SCORE*** ON THE ***VALIDATION DATA***")
+                    print("[*** Test Data ***] Classification Performance on individual classes:")
                     precisions_none, recalls_none, fscores_none, supports_none = precision_recall_fscore_support(
-                        [category2index[domain['categories'][1]] for domain in self.domains_val],
-                        pred_val, average=None)
+                        [category2index[domain['categories'][1]] for domain in self.domains_test], pred_test, average=None)
                     print(tabulate(zip((categories[i] for i in range(len(precisions_none))),
                                        precisions_none, recalls_none, fscores_none, supports_none),
                                    headers=['category', 'precision', 'recall', 'f-score', 'support'],
