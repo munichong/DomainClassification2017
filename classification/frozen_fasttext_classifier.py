@@ -26,7 +26,6 @@ num_filters = 512
 embed_dimen = 300
 # n_fc_neurons = 64
 dropout_rate = 0.5
-n_cnn_layer = 1
 n_fc_layers= 3
 act_fn = tf.nn.relu
 
@@ -218,24 +217,11 @@ class PretrainFastTextClassifier:
         if 'CNN' in type:
             pooled_outputs = []
             for filter_size in filter_sizes:
-
-                filter_shape = [filter_size, embed_dimen, 1, num_filters]
-
                 x_embed_expanded = tf.expand_dims(x_embed, -1)
 
                 # print(x_embed_expanded.get_shape())
 
-                flatten_out = x_embed_expanded
-                k = embed_dimen
-                for _ in range(n_cnn_layer - 1):
-                    conv_out = self.conv_layer(flatten_out, filter_size, k)
-                    # print(conv_out.get_shape())
-                    maxpool_out = self.maxpool_layer(conv_out, filter_size)
-                    # print(maxpool_out.get_shape())
-                    flatten_out = tf.reshape(maxpool_out, [-1, self.params['max_domain_segments_len'], num_filters, 1])
-                    # print(flatten_out1.get_shape())
-
-                conv_out = self.conv_layer(flatten_out, filter_size, k)
+                conv_out = self.conv_layer(x_embed_expanded, filter_size, embed_dimen)
                 # print(conv_out.get_shape())
                 maxpool_out = self.maxpool_layer_last(conv_out)
                 # print(maxpool_out.get_shape())
