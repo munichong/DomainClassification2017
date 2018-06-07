@@ -222,6 +222,17 @@ class BaselineClassifier:
         print("Precision (macro): %.4f, Recall (macro): %.4f, F-score (macro): %.4f" % (precision, recall, fscore))
         print("Accuracy: %.4f" % accuracy_score(y, y_pred))
 
+        y_pred_dec = clf.decision_function(X)
+        print("Mean Reciprocal Rank: %.4f" % self.mean_reciprocal_rank(y, y_pred_dec))
+
+    def mean_reciprocal_rank(self, y, y_pred):
+        reciprocal_rank = 0
+        for catIdx_true, sm_pred in zip(y, y_pred):
+            sorted_res = sorted(enumerate(sm_pred), key=lambda x: x[1], reverse=True)
+            rank = [rank for rank, (catIdx, score) in enumerate(sorted_res, start=1) if catIdx == catIdx_true][0]
+            reciprocal_rank += 1.0 / rank
+        return reciprocal_rank / len(y)
+
     def get_detailed_evalRes(self, clf, X_train, y_train, X_val, y_val, X_test, y_test):
 
         clf.fit(X_train, y_train)
