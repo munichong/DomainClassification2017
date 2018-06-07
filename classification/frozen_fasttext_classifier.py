@@ -268,16 +268,6 @@ class PretrainFastTextClassifier:
         n_correct = tf.reduce_sum(tf.cast(is_correct, tf.float32))
         accuracy = tf.reduce_mean(tf.cast(is_correct, tf.float32))
 
-        '''
-        # ranking evaluation
-        ranked_res = tf.nn.top_k(logits, k=self.params['num_targets'], sorted=True).indices
-        y_2d = tf.reshape(y, (tf.shape(y)[0], 1))
-        a = tf.where(tf.equal(ranked_res, y_2d))
-        a = tf.gather_nd(a, ranked_res)
-        print(a)
-        print(a.shape)
-        rank_sum = tf.reduce_sum(a)[:, -1]
-        '''
 
         init = tf.global_variables_initializer()
 
@@ -349,6 +339,8 @@ class PretrainFastTextClassifier:
                     print("GET THE HIGHEST ***F-SCORE*** ON THE ***VALIDATION DATA***!")
                     print()
 
+
+
                     print("[*** Test Data ***] Classification Performance on individual classes:")
                     precisions_none, recalls_none, fscores_none, supports_none = precision_recall_fscore_support(
                         [category2index[domain['categories'][1]] for domain in self.domains_test], pred_test,
@@ -360,10 +352,13 @@ class PretrainFastTextClassifier:
                     precisions_macro_test, recalls_macro_test, fscores_macro_test, _ = precision_recall_fscore_support(
                         [category2index[domain['categories'][1]] for domain in self.domains_test],
                         pred_test, average='macro')
-                    print("Precision (macro): %.4f, Recall (macro): %.4f, F-score (macro): %.4f" %
-                          (precisions_macro_test, recalls_macro_test, fscores_macro_test))
+                    print("Precision (macro): %.4f, Recall (macro): %.4f, F-score (macro): %.4f, Mean Reciprocal Rank: %.4f" %
+                          (precisions_macro_test, recalls_macro_test, fscores_macro_test,
+                           self.mean_reciprocal_rank(self.domains_test, softmax_test)))
 
-                    # output all incorrect_prediction
+
+
+                    # output all incorrect_prediction on VALIDATION data
                     with open(os.path.join(OUTPUT_DIR, 'incorrect_predictions.csv'), 'w', newline="\n") as outfile:
                         csv_writer = csv.writer(outfile)
                         csv_writer.writerow(('RAW_DOMAIN', 'SEGMENTED_DOMAIN', 'TRUE_CATEGORY', 'PRED_CATEGORY'))
@@ -376,7 +371,9 @@ class PretrainFastTextClassifier:
                                                  categories[pred_catIdx]))
                     val_fscore_history.append(fscores_macro_val)
 
-                    # output all prediction
+
+
+                    # output all prediction on VALIDATION data
                     with open(os.path.join(OUTPUT_DIR, 'all_predictions_frozen.csv'), 'w', newline="\n") as outfile:
                         csv_writer = csv.writer(outfile)
                         csv_writer.writerow(sorted(category2index.items(), key=lambda x: x[1]))
@@ -388,6 +385,18 @@ class PretrainFastTextClassifier:
                                                  domain['categories'][1],
                                                  categories[pred_catIdx],
                                                  str(pred_softmax)))
+
+
+
+    def mean_reciprocal_rank(self, domains, softmax_pred):
+        reciprocal_rank = 0
+        for domain, sm_pred in zip(domains, softmax_pred):
+            catIdx_true = category2index[domain['categories'][1]]
+            sorted_res = sorted(enumerate(sm_pred), key=lambda x: x[1], reverse=True)
+            rank = [rank for rank, (catIdx, score) in enumerate(sorted_res, start=1) if catIdx == catIdx_true][0]
+            reciprocal_rank += 1.0 / rank
+        return reciprocal_rank / len(domains)
+
 
 
 
