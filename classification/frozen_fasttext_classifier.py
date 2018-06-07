@@ -26,7 +26,7 @@ num_filters = 512
 embed_dimen = 300
 # n_fc_neurons = 64
 dropout_rate = 0.5
-n_fc_layers= 3
+n_fc_layers= 1
 act_fn = tf.nn.relu
 
 n_epochs = 40
