@@ -39,17 +39,20 @@ with open(DMOZ_PATH, encoding='utf-8') as infile:
         # domain = '.'.join([tld.subdomain, tld.domain])
         # print(tld.subdomain, tld.domain)
 
+        '''
         # Remove domains with subdomains such as "http://bakery.cdkitchen.com/"
         # Do not remove domains such as "http://mikegrost.com/"
         if (subdomain and subdomain != 'www') and len(re.findall('(?=\.)', raw_domain)) > 1:
-            # print(raw_domain)
+            print(raw_domain)
             output_table[raw_domain] = {}
             continue
+        '''
 
         url_seg = urlparse(raw_domain)
         if url_seg.path != '/' or url_seg.query or url_seg.fragment:
             output_table[raw_domain] = {}
             continue
+        # print(raw_domain)
 
         category_path = line[1].split('/')
         desc = ' '.join(line[2:]).replace(',', ' ')
