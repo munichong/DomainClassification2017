@@ -352,9 +352,11 @@ class PretrainFastTextClassifier:
                     precisions_macro_test, recalls_macro_test, fscores_macro_test, _ = precision_recall_fscore_support(
                         [category2index[domain['categories'][1]] for domain in self.domains_test],
                         pred_test, average='macro')
-                    print("Precision (macro): %.4f, Recall (macro): %.4f, F-score (macro): %.4f, Mean Reciprocal Rank: %.4f" %
-                          (precisions_macro_test, recalls_macro_test, fscores_macro_test,
-                           self.mean_reciprocal_rank(self.domains_test, softmax_test)))
+
+                    mrr, avg_r = self.mean_reciprocal_rank(self.domains_test, softmax_test)
+                    print("Precision (macro): %.4f, Recall (macro): %.4f, F-score (macro): %.4f, "
+                          "\nMean Reciprocal Rank: %.4f, Average Rank: %.4f" %
+                          (precisions_macro_test, recalls_macro_test, fscores_macro_test, mrr, avg_r))
 
 
 
@@ -390,12 +392,14 @@ class PretrainFastTextClassifier:
 
     def mean_reciprocal_rank(self, domains, softmax_pred):
         reciprocal_rank = 0
+        average_rank = 0
         for domain, sm_pred in zip(domains, softmax_pred):
             catIdx_true = category2index[domain['categories'][1]]
             sorted_res = sorted(enumerate(sm_pred), key=lambda x: x[1], reverse=True)
             rank = [rank for rank, (catIdx, score) in enumerate(sorted_res, start=1) if catIdx == catIdx_true][0]
             reciprocal_rank += 1.0 / rank
-        return reciprocal_rank / len(domains)
+            average_rank += rank
+        return reciprocal_rank / len(domains), average_rank / len(domains)
 
 
 
