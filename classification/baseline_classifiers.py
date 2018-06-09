@@ -258,7 +258,7 @@ if __name__ == '__main__':
     token='char-ngram': Baykan2011-based method
     token='word': simple segment-based method
     '''
-    X_train, y_train, X_val, y_val, X_test, y_test = classifier.buildXY(token='char-ngram', desc=False)
+    X_train, y_train, X_val, y_val, X_test, y_test = classifier.buildXY(token='word', desc=False)
 
     clf = LinearSVC(C=0.5, penalty='l2', verbose=0)
     classifier.get_detailed_evalRes(clf, X_train, y_train, X_val, y_val, X_test, y_test)

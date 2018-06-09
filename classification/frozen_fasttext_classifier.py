@@ -26,11 +26,11 @@ num_filters = 512
 embed_dimen = 300
 # n_fc_neurons = 64
 dropout_rate = 0.5
-n_fc_layers= 1
+n_fc_layers= 3
 act_fn = tf.nn.relu
 
-n_epochs = 40
-batch_size = 512
+n_epochs = 50
+batch_size = 2000
 lr_rate = 0.001
 
 class_weighted = False
@@ -243,7 +243,6 @@ class PretrainFastTextClassifier:
         # concatenate suffix one-hot and the abstract representation of the domains segments
         # The shape of cat_layer should be [batch_size, n_lstm_neurons+self.params['num_suffix']]
         cat_layer = tf.concat(domain_vectors + [x_suffix, x_all], -1)
-        # print(cat_layer.get_shape())
 
         logits = cat_layer
         for _ in range(n_fc_layers):

@@ -29,27 +29,28 @@ num_filters = 512
 
 embed_dimen = 300
 # n_fc_neurons = 64
-dropout_rate= 0.2
+dropout_rate= 0.5
 n_fc_layers= 3
 act_fn = tf.nn.relu
 
-n_epochs = 100
-batch_size = 2000
+n_epochs = 60
+batch_size = 1500
 lr_rate = 0.001
 
 
 class_weighted = False
 
 
-REDUCE_TO_WORD_LEVEL = False
+REDUCE_TO_WORD_LEVEL = True
 
 if REDUCE_TO_WORD_LEVEL:
     filter_sizes = [2, 1]
 else:
     filter_sizes = [1]
 
-FROZEN = True
-FT_INITIAL = True
+FROZEN = False
+FT_INITIAL = False
+
 
 
 OUTPUT_DIR = '../Output/'
@@ -209,9 +210,10 @@ class FastTextBasedClassifier:
         total_loss = 0
         total_bool = []
         total_pred = []
+        total_softmax = []
         n_batch = 0
         for X_batch_embed, X_batch_mask, domain_actual_lens, X_batch_suf, sample_weights, y_batch in self.next_batch(data):
-            batch_correct, batch_loss, batch_bool, batch_pred = session.run(eval_nodes,
+            batch_correct, batch_loss, batch_bool, batch_pred, batch_softmax = session.run(eval_nodes,
                                                          feed_dict={
                                                                     'bool_train:0': False,
                                                                     'embedding:0': X_batch_embed,
@@ -226,8 +228,9 @@ class FastTextBasedClassifier:
             total_correct += batch_correct
             total_bool.extend(batch_bool)
             total_pred.extend(batch_pred)
+            total_softmax.extend(batch_softmax)
             n_batch += 1
-        return total_loss / n_batch, total_correct / len(data), total_bool, total_pred
+        return total_loss / n_batch, total_correct / len(data), total_bool, total_pred, total_softmax
 
 
 
@@ -342,6 +345,7 @@ class FastTextBasedClassifier:
         training_op = optimizer.minimize(loss_mean)
 
         prediction = tf.argmax(logits, axis=-1)
+        prediction_softmax = tf.nn.softmax(logits)
         is_correct = tf.nn.in_top_k(logits, y, 1) # logits are unscaled, but here we only care the argmax
         n_correct = tf.reduce_sum(tf.cast(is_correct, tf.float32))
         accuracy = tf.reduce_mean(tf.cast(is_correct, tf.float32))
@@ -362,7 +366,7 @@ class FastTextBasedClassifier:
         with tf.Session() as sess:
             init.run()
             n_total_batches = int(np.ceil(len(self.domains_train) / batch_size))
-            test_fscore_history = []
+            val_fscore_history = []
             for epoch in range(1, n_epochs + 1):
                 # model training
                 n_batch = 0
@@ -388,60 +392,69 @@ class FastTextBasedClassifier:
 
 
                 # evaluation on training data
-                eval_nodes = [n_correct, loss_mean, is_correct, prediction]
+                eval_nodes = [n_correct, loss_mean, is_correct, prediction, prediction_softmax]
                 print()
                 print("========== Evaluation at Epoch %d ==========" % epoch)
-                loss_train, acc_train, _, _ = self.evaluate(self.domains_train, sess, eval_nodes)
+                loss_train, acc_train, _, _, _ = self.evaluate(self.domains_train, sess, eval_nodes)
                 print("*** On Training Set:\tloss = %.6f\taccuracy = %.4f" % (loss_train, acc_train))
 
                 # evaluation on validation data
-                loss_val, acc_val, _, _ = self.evaluate(self.domains_val, sess, eval_nodes)
+                loss_val, acc_val, _, _, softmax_val = self.evaluate(self.domains_val, sess, eval_nodes)
                 print("*** On Validation Set:\tloss = %.6f\taccuracy = %.4f" % (loss_val, acc_val))
 
                 # evaluate on test data
-                loss_test, acc_test, is_correct_test, pred_test = self.evaluate(self.domains_test, sess, eval_nodes)
+                loss_test, acc_test, is_correct_test, pred_test, softmax_test = self.evaluate(self.domains_test, sess, eval_nodes)
                 print("*** On Test Set:\tloss = %.6f\taccuracy = %.4f" % (loss_test, acc_test))
 
-                print()
-                print("Macro average:")
-                precisions_macro, recalls_macro, fscores_macro, _ = precision_recall_fscore_support(
+
+                precisions_macro_val, recalls_macro_val, fscores_macro_val, _ = precision_recall_fscore_support(
                                               [category2index[domain['categories'][1]]
                                                for domain in self.domains_test
                                                if not domain['skipped']],
                                                pred_test, average='macro')
                 print("Precision (macro): %.4f, Recall (macro): %.4f, F-score (macro): %.4f" %
-                      (precisions_macro, recalls_macro, fscores_macro))
+                      (precisions_macro_val, recalls_macro_val, fscores_macro_val))
                 print()
 
 
 
-                if not test_fscore_history or fscores_macro > max(test_fscore_history):
-                    # the accuracy of this epoch is the largest
-                    print("Classification Performance on individual classes:")
+                if not val_fscore_history or fscores_macro_val > max(val_fscore_history):
+                    print("GET THE HIGHEST ***F-SCORE*** ON THE ***VALIDATION DATA***!")
+                    print()
+
+
+
+                    print("[*** Test Data ***] Classification Performance on individual classes:")
                     precisions_none, recalls_none, fscores_none, supports_none = precision_recall_fscore_support(
-                        [category2index[domain['categories'][1]]
-                         for domain in self.domains_test
-                         if not domain['skipped']],
-                        pred_test, average=None)
+                        [category2index[domain['categories'][1]] for domain in self.domains_test], pred_test,
+                        average=None)
                     print(tabulate(zip((categories[i] for i in range(len(precisions_none))),
                                        precisions_none, recalls_none, fscores_none, supports_none),
                                    headers=['category', 'precision', 'recall', 'f-score', 'support'],
                                    tablefmt='orgtbl'))
+                    precisions_macro_test, recalls_macro_test, fscores_macro_test, _ = precision_recall_fscore_support(
+                        [category2index[domain['categories'][1]] for domain in self.domains_test],
+                        pred_test, average='macro')
 
-                    # output all incorrect_prediction
-                    with open(os.path.join(OUTPUT_DIR, 'incorrect_predictions.csv'), 'w') as outfile:
-                        csv_writer = csv.writer(outfile)
-                        csv_writer.writerow(('RAW_DOMAIN', 'SEGMENTED_DOMAIN', 'TRUE_CATEGORY', 'PRED_CATEGORY'))
-                        for correct, pred_catIdx, domain in zip(is_correct_test, pred_test, self.domains_test):
-                            if correct:
-                                continue
-                            csv_writer.writerow((domain['raw_domain'],
-                                                 domain['segmented_domain'],
-                                                 domain['categories'][1],
-                                                 categories[pred_catIdx]))
+                    mrr, avg_r = self.mean_reciprocal_rank(self.domains_test, softmax_test)
+                    print("Precision (macro): %.4f, Recall (macro): %.4f, F-score (macro): %.4f, "
+                          "\nMean Reciprocal Rank: %.4f, Average Rank: %.4f" %
+                          (precisions_macro_test, recalls_macro_test, fscores_macro_test, mrr, avg_r))
 
-                test_fscore_history.append(fscores_macro)
 
+
+
+
+    def mean_reciprocal_rank(self, domains, softmax_pred):
+        reciprocal_rank = 0
+        average_rank = 0
+        for domain, sm_pred in zip(domains, softmax_pred):
+            catIdx_true = category2index[domain['categories'][1]]
+            sorted_res = sorted(enumerate(sm_pred), key=lambda x: x[1], reverse=True)
+            rank = [rank for rank, (catIdx, score) in enumerate(sorted_res, start=1) if catIdx == catIdx_true][0]
+            reciprocal_rank += 1.0 / rank
+            average_rank += rank
+        return reciprocal_rank / len(domains), average_rank / len(domains)
 
 
 

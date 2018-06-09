@@ -36,7 +36,8 @@ with open(DMOZ_PATH, encoding='utf-8') as infile:
         # raw_domain = 'http://www.vital-e.co.uk/'
         tld = extract(raw_domain)
         subdomain, domain, suffix = tld.subdomain, tld.domain, tld.suffix
-        # domain = '.'.join([tld.subdomain, tld.domain])
+        if subdomain and subdomain != 'www':
+            domain = '.'.join([subdomain.replace('www.', ''), domain])
         # print(tld.subdomain, tld.domain)
 
         '''
@@ -60,12 +61,18 @@ with open(DMOZ_PATH, encoding='utf-8') as infile:
         # http://www.e-scanshop.com/ ---> ['e', 'scan', 'shop']
         #                             not ['es', 'can', 'shop']
         segmented_domain = []
+        # print(raw_domain)
+        # print(domain)
         if '-' in domain:
-            for s in domain.split('-'):
-                segmented_domain.extend(segment(s))
+            temp_domain = '.'.join(domain.split('-'))
+            temp_domain = temp_domain.split('.')
+            for s in temp_domain:
+                segmented_domain.extend(segment(s))  # segment function is slow. Don't use for desc
         else:
-            segmented_domain = segment(domain) # segment function is slow. Don't use for desc
-
+            for s in domain.split('.'):
+                segmented_domain.extend(segment(s))
+        # print(segmented_domain)
+        # print()
 
         output_table[raw_domain] = {
                                      'categories': category_path,
