@@ -16,7 +16,7 @@ from gensim.models.wrappers import FastText
 
 DATASET = 'content'  # 'content' or '2340768'
 
-type = 'RNN'
+type = 'CNN'
 # For RNN
 n_rnn_neurons = 300
 # For CNN
@@ -30,7 +30,7 @@ n_fc_layers= 3
 act_fn = tf.nn.relu
 
 n_epochs = 50
-batch_size = 2000
+batch_size = 512
 lr_rate = 0.001
 
 class_weighted = False
