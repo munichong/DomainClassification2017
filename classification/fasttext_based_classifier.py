@@ -34,7 +34,7 @@ n_fc_layers= 3
 act_fn = tf.nn.relu
 
 n_epochs = 60
-batch_size = 1500
+batch_size = 1000
 lr_rate = 0.001
 
 
@@ -48,8 +48,8 @@ if REDUCE_TO_WORD_LEVEL:
 else:
     filter_sizes = [1]
 
-FROZEN = False
-FT_INITIAL = False
+FROZEN = True
+FT_INITIAL = True
 
 
 
@@ -366,7 +366,7 @@ class FastTextBasedClassifier:
         with tf.Session() as sess:
             init.run()
             n_total_batches = int(np.ceil(len(self.domains_train) / batch_size))
-            val_fscore_history = []
+            max_val_fscore = -1
             for epoch in range(1, n_epochs + 1):
                 # model training
                 n_batch = 0
@@ -399,7 +399,7 @@ class FastTextBasedClassifier:
                 print("*** On Training Set:\tloss = %.6f\taccuracy = %.4f" % (loss_train, acc_train))
 
                 # evaluation on validation data
-                loss_val, acc_val, _, _, softmax_val = self.evaluate(self.domains_val, sess, eval_nodes)
+                loss_val, acc_val, _, pred_val, softmax_val = self.evaluate(self.domains_val, sess, eval_nodes)
                 print("*** On Validation Set:\tloss = %.6f\taccuracy = %.4f" % (loss_val, acc_val))
 
                 # evaluate on test data
@@ -409,16 +409,17 @@ class FastTextBasedClassifier:
 
                 precisions_macro_val, recalls_macro_val, fscores_macro_val, _ = precision_recall_fscore_support(
                                               [category2index[domain['categories'][1]]
-                                               for domain in self.domains_test
+                                               for domain in self.domains_val
                                                if not domain['skipped']],
-                                               pred_test, average='macro')
+                                               pred_val, average='macro')
                 print("Precision (macro): %.4f, Recall (macro): %.4f, F-score (macro): %.4f" %
                       (precisions_macro_val, recalls_macro_val, fscores_macro_val))
                 print()
 
 
 
-                if not val_fscore_history or fscores_macro_val > max(val_fscore_history):
+                if max_val_fscore < 0 or fscores_macro_val > max_val_fscore:
+                    max_val_fscore = fscores_macro_val
                     print("GET THE HIGHEST ***F-SCORE*** ON THE ***VALIDATION DATA***!")
                     print()
 

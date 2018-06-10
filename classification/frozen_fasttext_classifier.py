@@ -16,7 +16,7 @@ from gensim.models.wrappers import FastText
 
 DATASET = 'content'  # 'content' or '2340768'
 
-type = 'CNN'
+type = 'RNN'
 # For RNN
 n_rnn_neurons = 300
 # For CNN
@@ -284,7 +284,7 @@ class PretrainFastTextClassifier:
         with tf.Session() as sess:
             init.run()
             n_total_batches = int(np.ceil(len(self.domains_train) / batch_size))
-            val_fscore_history = []
+            max_val_fscore = -1
             for epoch in range(1, n_epochs + 1):
                 # model training
                 n_batch = 0
@@ -334,7 +334,8 @@ class PretrainFastTextClassifier:
 
 
 
-                if not val_fscore_history or fscores_macro_val > max(val_fscore_history):
+                if max_val_fscore < 0 or fscores_macro_val > max_val_fscore:
+                    max_val_fscore = fscores_macro_val
                     print("GET THE HIGHEST ***F-SCORE*** ON THE ***VALIDATION DATA***!")
                     print()
 
@@ -370,7 +371,7 @@ class PretrainFastTextClassifier:
                                                  domain['segmented_domain'],
                                                  domain['categories'][1],
                                                  categories[pred_catIdx]))
-                    val_fscore_history.append(fscores_macro_val)
+
 
 
 
@@ -386,6 +387,7 @@ class PretrainFastTextClassifier:
                                                  domain['categories'][1],
                                                  categories[pred_catIdx],
                                                  str(pred_softmax)))
+
 
 
 
